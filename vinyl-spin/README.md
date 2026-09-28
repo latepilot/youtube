@@ -44,6 +44,8 @@ node render.mjs --preset preset.json --bg фон.jpg --disk диск.png --logo 
 node render.mjs --preset preset.json --limit 20                  # первые 20 с для проверки
 node render.mjs --preset preset.json --from -20 --limit 20       # последние 20 с (зум в конце)
 node render.mjs --preset preset.json --frame 3000 --png кадр.png # один кадр в PNG
+node render.mjs --preset preset.json --logo другой.png       # свой логотип
+node render.mjs --preset preset.json --logo ""               # без логотипа
 node render.mjs --help
 ```
 
@@ -53,7 +55,7 @@ node render.mjs --help
 
 ```bash
 node test.mjs               # всё: исходники, детерминизм, звук во всех форматах, WebCodecs H.264, скорость
-node test.mjs speed         # только скорость: 60 с 1080p30 через WebCodecs и через videotoolbox
+node test.mjs speed         # только скорость: 60 с 1080p25 через WebCodecs и через videotoolbox
 VS_SPEED_SEC=300 node test.mjs speed   # замер подольше
 ```
 
@@ -65,7 +67,7 @@ VS_SPEED_SEC=300 node test.mjs speed   # замер подольше
 |---|---|
 | Диск | 90 % высоты кадра, по центру, 33⅓ об/мин по часовой, без размытия движения |
 | Дырка | 7,3 % диаметра диска, заливка #C0C0C0 с зерном (есть режим «прозрачная») |
-| Логотип | 13,1 % высоты, отступ 4,2 % справа и 4,0 % снизу |
+| Логотип | стандартный KËNIG FLOW (вшит в `index.html`, оригинал `assets/logo.jpg`), 13,1 % высоты, отступ 4,2 % справа и 4,0 % снизу |
 | Зерно | монохромное, размер 2,5 px (при 1080p), СКО 6,5 %, только на фоне и в дырке |
 | Зум | 1,00 → 1,15 линейно за всю длину. **Это не замер, а заглушка** (см. вопросы в handoff.md §5) |
-| Видео | 1080p30, H.264 High, 25 Мбит/с, ключевой кадр каждые 0,5 с |
+| Видео | 1080p, 25 fps (есть 24/30/50/60), H.264 High, 25 Мбит/с, ключевой кадр каждые 0,5 с |

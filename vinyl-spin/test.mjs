@@ -32,7 +32,6 @@ async function makeAssets() {
   const imgs = await p.evaluate(() => ({ bg: placeholderBg().toDataURL('image/png'), disk: placeholderDisk().toDataURL('image/png') }));
   await b.close();
   for (const [k, v] of Object.entries(imgs)) fs.writeFileSync(path.join(DIR, `${k}.png`), Buffer.from(v.split(',')[1], 'base64'));
-  fs.copyFileSync(path.join(HERE, 'assets', 'logo-from-reference.png'), path.join(DIR, 'logo.png'));
   // звук: синус + розовый шум, чтобы работали все младшие биты
   const src = ['-f', 'lavfi', '-i', 'sine=f=220:d=8:sample_rate=96000', '-f', 'lavfi', '-i', 'anoisesrc=d=8:a=0.08:c=pink:r=96000:seed=5',
     '-filter_complex', '[0][1]amix=inputs=2:normalize=0,pan=stereo|c0=c0|c1=0.7*c0'];
@@ -47,7 +46,7 @@ async function makeAssets() {
     ['aac.m4a', ['-ar', '48000', '-c:a', 'aac', '-b:a', '256k']],
   ];
   for (const [name, enc] of audio) sh('ffmpeg', ['-v', 'error', '-y', ...src, ...enc, path.join(DIR, name)]);
-  fs.writeFileSync(path.join(DIR, 'preset.json'), JSON.stringify({ app: 'vinyl-spin', version: 1, params: {}, files: { bg: 'bg.png', disk: 'disk.png', logo: 'logo.png', audio: 'wav24.wav' } }, null, 2));
+  fs.writeFileSync(path.join(DIR, 'preset.json'), JSON.stringify({ app: 'vinyl-spin', version: 1, params: {}, files: { bg: 'bg.png', disk: 'disk.png', audio: 'wav24.wav' } }, null, 2));
   console.log(`исходники: ${DIR}`);
 }
 
@@ -76,7 +75,7 @@ function testAudio() {
   }
 }
 
-// ---------- скорость: 1080p30, VS_SPEED_SEC секунд (по умолчанию 60 на маке, 20 здесь), зум рассчитан на час ----------
+// ---------- скорость: 1080p25, VS_SPEED_SEC секунд (по умолчанию 60 на маке, 20 здесь), зум рассчитан на час ----------
 function testSpeed() {
   const mac = process.platform === 'darwin';
   const sec = process.env.VS_SPEED_SEC || (mac ? '60' : '20');
@@ -85,7 +84,7 @@ function testSpeed() {
     const r = render(['--preset', path.join(DIR, 'preset.json'), '--audio', '', '--duration', '3600', '--limit', sec, '--encoder', enc, '--out', out]);
     console.log(`[${enc}]\n` + r.stdout.split('\n').filter(l => /Готово|файл:|GPU|кодировщик/.test(l)).join('\n'));
     const fps = Number(/([\d.]+) кадр\/с, ×/.exec(r.stdout)?.[1]);
-    if (fps) console.log(`  → час видео 1080p30 займёт ≈ ${(108000 / fps / 60).toFixed(0)} мин`);
+    if (fps) console.log(`  → час видео 1080p25 займёт ≈ ${(90000 / fps / 60).toFixed(0)} мин`);
   }
 }
 

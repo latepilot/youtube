@@ -16,13 +16,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const HELP = `
 vinyl-spin render: ролик «вращающаяся пластинка» во всю длину аудио
+Логотип по умолчанию стандартный (вшит в index.html); --logo файл.png — свой, --logo "" — без логотипа.
 
   node render.mjs --preset preset.json [--bg фон.jpg --disk диск.png --logo лого.png --audio микс.wav] [--out ролик.mov]
 
 Файлы из пресета («files») ищутся рядом с пресетом; флаги их перекрывают.
 
   --out ПУТЬ          итоговый файл (по умолчанию рядом с аудио; .mov для PCM, .mp4 для MP3/AAC)
-  --fps 25|30|50|60   частота кадров (иначе из пресета)
+  --fps 24|25|30|50|60  частота кадров (иначе из пресета, по умолчанию 25)
   --res 1080|1440|2160|ШxВ
   --bitrate МБИТ      битрейт видео (иначе из пресета, по умолчанию 25)
   --duration СЕК      длительность, если аудио нет
@@ -134,6 +135,7 @@ if (args.preset) {
   presetDir = path.dirname(pp);
 }
 function fileArg(kind) {
+  if (kind === 'logo' && typeof args.logo !== 'string' && (preset.params.logoMode || 'default') !== 'file') return null; // стандартный или без логотипа
   if (args[kind] === '') return null; // --audio "" — без звука, даже если он есть в пресете
   if (typeof args[kind] === 'string') return path.resolve(args[kind]);
   const f = preset.files[kind];
@@ -147,6 +149,9 @@ const params = { ...preset.params };
 if (args.fps) params.fps = Number(args.fps);
 if (args.res) params.res = { 1080: '1920x1080', 1440: '2560x1440', 2160: '3840x2160', 720: '1280x720' }[args.res] || args.res;
 if (args.bitrate) params.bitrate = Number(args.bitrate);
+// логотип: --logo файл (свой), --logo "" (без логотипа); иначе как в пресете, по умолчанию стандартный вшитый
+if (typeof args.logo === 'string') params.logoMode = args.logo === '' ? 'none' : 'file';
+else if (params.logoMode === 'file' && !files.logo) params.logoMode = 'default';
 
 const onlyFrame = args.frame !== undefined && (args.hash || args.png);
 let T, audioInfo = null, plan = null;
@@ -201,6 +206,7 @@ page.on('pageerror', e => { pageError = e; console.error('[страница]', e
 page.on('console', m => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) console.error('[страница]', m.text()); });
 await page.goto(`${base}/index.html?render=1`);
 if (pageError || !(await page.evaluate(() => !!window.VS))) { await cleanup(); die('index.html не запустился: ' + (pageError?.message || 'нет window.VS')); }
+await page.evaluate(() => VS.ready);
 const gpu = await page.evaluate(() => VS.gpu());
 await page.evaluate(async ({ params, T, has }) => {
   VS.setParams(params);
