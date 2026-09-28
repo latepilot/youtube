@@ -7,10 +7,8 @@ import { chromium } from 'playwright';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { spawn, execFileSync } from 'node:child_process';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { audioPlan, ffmpegArgs, startFfmpeg, verifyOutput } from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,73 +57,6 @@ if (args.help || args.h) { console.log(HELP); process.exit(0); }
 const log = (...m) => console.log(...m);
 const die = (m) => { console.error('\nОшибка: ' + m); process.exit(1); };
 
-// ---------- ffmpeg / ffprobe ----------
-function ffprobeJSON(file, extra = []) {
-  const out = execFileSync('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', ...extra, file], { maxBuffer: 64 << 20 });
-  return JSON.parse(out.toString());
-}
-function run(cmd, argv, { input } = {}) {
-  return new Promise((res, rej) => {
-    const p = spawn(cmd, argv, { stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    p.stdout.on('data', d => out += d); p.stderr.on('data', d => err += d);
-    p.on('close', code => code === 0 ? res({ out, err }) : rej(new Error(`${cmd} завершился с кодом ${code}\n${err.slice(-3000)}`)));
-    if (input) p.stdin.end(input); else p.stdin.end();
-  });
-}
-const LOSSLESS = new Set(['flac', 'alac', 'wavpack', 'tta', 'ape', 'mlp', 'truehd', 'shorten']);
-// PCM-кодек, в котором декодированный звук хэшируется без потерь (зависит от sample_fmt декодера)
-function md5Codec(sampleFmt) {
-  const f = sampleFmt.replace(/p$/, '');
-  return { u8: 'pcm_u8', s16: 'pcm_s16le', s32: 'pcm_s32le', s64: 'pcm_s64le', flt: 'pcm_f32le', dbl: 'pcm_f64le' }[f] || 'pcm_f64le';
-}
-function pcmFor(stream) {
-  const bits = Number(stream.bits_per_raw_sample) || Number(stream.bits_per_sample) || 0;
-  const f = (stream.sample_fmt || '').replace(/p$/, '');
-  if (f === 'flt') return 'pcm_f32le';
-  if (f === 'dbl') return 'pcm_f64le';
-  if (f === 's16' || bits === 16) return 'pcm_s16le';
-  if (bits && bits <= 24) return 'pcm_s24le';
-  return 'pcm_s32le';
-}
-// Решение по звуку: что делать, в какой контейнер
-function audioPlan(info) {
-  const s = info.streams.find(x => x.codec_type === 'audio');
-  if (!s) die('в аудиофайле нет звуковой дорожки');
-  const c = s.codec_name;
-  if (c.startsWith('pcm_')) return { stream: s, args: ['-c:a', 'copy'], ext: '.mov', desc: `PCM ${c} копируется как есть` };
-  if (LOSSLESS.has(c)) { const pcm = pcmFor(s); return { stream: s, args: ['-c:a', pcm], ext: '.mov', desc: `${c} → ${pcm} (без потерь, та же разрядность и частота)` }; }
-  return { stream: s, args: ['-c:a', 'copy'], ext: ['mp3', 'aac'].includes(c) ? '.mp4' : '.mov', desc: `${c} копируется как есть, без перекодирования` };
-}
-// Декодирует дорожку в PCM и считает md5 потоково. limit: сколько байт хэшировать (остальное только считается)
-function pcmHash(file, codec, limit = Infinity) {
-  return new Promise((res, rej) => {
-    const p = spawn('ffmpeg', ['-v', 'error', '-i', file, '-map', '0:a:0', '-c:a', codec, '-f', codec.slice(4), '-']);
-    const h = crypto.createHash('md5'); let n = 0;
-    p.stdout.on('data', (d) => { const take = Math.max(0, Math.min(d.length, limit - n)); if (take) h.update(take === d.length ? d : d.subarray(0, take)); n += d.length; });
-    let err = ''; p.stderr.on('data', d => err += d);
-    p.on('close', code => code === 0 ? res({ md5: h.digest('hex'), bytes: n }) : rej(new Error(err)));
-  });
-}
-// Сравнение звука бит-в-бит: весь исходник должен совпасть с началом дорожки ролика.
-// У MP3/AAC в конце может остаться паддинг последнего кадра (его обрезку MOV/MP4 не хранят) — сообщаем отдельно.
-async function comparePcm(src, out, codec, stream) {
-  const a = await pcmHash(src, codec);
-  const b = await pcmHash(out, codec, a.bytes);
-  const bps = { pcm_u8: 1, pcm_s16le: 2, pcm_s32le: 4, pcm_s64le: 8, pcm_f32le: 4, pcm_f64le: 8 }[codec] * (stream.channels || 2);
-  return { same: a.md5 === b.md5 && b.bytes >= a.bytes, a: a.md5, b: b.md5, extra: (b.bytes - a.bytes) / bps, samples: a.bytes / bps };
-}
-async function packetMd5(file) {
-  const { out } = await run('ffmpeg', ['-v', 'error', '-i', file, '-map', '0:a:0', '-c:a', 'copy', '-f', 'streamhash', '-hash', 'md5', '-']);
-  return out.trim().split(',').pop();
-}
-async function loudness(file) {
-  const { err } = await run('ffmpeg', ['-nostats', '-hide_banner', '-i', file, '-map', '0:a:0', '-filter_complex', 'ebur128=peak=true', '-f', 'null', '-']);
-  const sum = err.slice(err.lastIndexOf('Summary:'));
-  const I = /I:\s+(-?[\d.]+|-inf) LUFS/.exec(sum)?.[1], TP = /Peak:\s+(-?[\d.]+|-inf) dBFS/.exec(sum)?.[1];
-  return { I, TP };
-}
-
 // ---------- параметры ----------
 let preset = { params: {}, files: {} }, presetDir = process.cwd();
 if (args.preset) {
@@ -154,26 +85,23 @@ if (typeof args.logo === 'string') params.logoMode = args.logo === '' ? 'none' :
 else if (params.logoMode === 'file' && !files.logo) params.logoMode = 'default';
 
 const onlyFrame = args.frame !== undefined && (args.hash || args.png);
-let T, audioInfo = null, plan = null;
+let T, plan = null;
 if (files.audio) {
-  audioInfo = ffprobeJSON(files.audio);
-  plan = audioPlan(audioInfo);
-  T = Number(plan.stream.duration) || Number(audioInfo.format.duration);
-  if (!(T > 0)) die('не удалось узнать длительность аудио');
+  try { plan = audioPlan(files.audio); } catch (e) { die(e.message); }
+  T = plan.T;
 } else {
   T = Number(args.duration) || (params.durMin ? params.durMin * 60 : 0);
   if (!(T > 0)) die('нет аудио: укажи --duration СЕК');
 }
 
 // ---------- локальный сервер: index.html, ассеты и приёмник потока ----------
-let sink = null; // { write(buf) → Promise }
+let sink = null; // задание ffmpeg из lib.mjs
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif', '.bmp': 'image/bmp', '.tif': 'image/tiff', '.tiff': 'image/tiff' };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'POST' && url.pathname === '/__sink') {
     if (!sink || sink.failed) { req.resume(); res.writeHead(sink ? 500 : 409); res.end(); return; }
-    req.on('data', (d) => { if (!sink.stream.write(d)) { req.pause(); sink.stream.once('drain', () => req.resume()); } });
-    req.on('end', () => { res.writeHead(204); res.end(); });
+    sink.pipeRequest(req).then(() => { res.writeHead(204); res.end(); });
     return;
   }
   let file;
@@ -264,49 +192,15 @@ if (vp9 && !/\.mkv$/i.test(out)) out = out.replace(/\.[^./\\]+$/, '') + '.mkv';
 fs.mkdirSync(path.dirname(out), { recursive: true });
 
 // ---------- ffmpeg ----------
-const color = ['-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv'];
-const ff = ['-hide_banner', '-v', 'warning', '-stats_period', '5', '-y'];
-if (encoder === 'webcodecs') {
-  if (vp9) ff.push('-f', 'ivf', '-i', 'pipe:0');
-  else ff.push('-thread_queue_size', '256', '-f', 'h264', '-framerate', String(fps), '-i', 'pipe:0');
-} else {
-  ff.push('-thread_queue_size', '256', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-s', `${W}x${H}`, '-framerate', String(fps), ...color, '-i', 'pipe:0');
-}
-if (files.audio) {
-  if (partial) ff.push('-ss', (startFrame / fps).toFixed(6), '-t', (count / fps).toFixed(6));
-  ff.push('-i', files.audio);
-}
-ff.push('-map', '0:v:0');
-if (files.audio) ff.push('-map', '1:a:0');
-if (encoder === 'webcodecs') {
-  ff.push('-c:v', 'copy');
-  // в сыром H.264 нет меток времени: ставим pts = dts = номер кадра (B-кадров нет, это проверяет браузер),
-  // и помечаем поток как BT.709 с ограниченным диапазоном — именно так кадры упакованы в I420
-  if (!vp9) ff.push('-bsf:v', `setts=ts=N:duration=1:time_base=1/${fps},h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0`, '-video_track_timescale', String(fps * 1000));
-} else if (encoder === 'videotoolbox') {
-  ff.push('-c:v', 'h264_videotoolbox', '-profile:v', 'high', '-b:v', String(bitrate), '-g', String(gop), ...color);
-} else {
-  const lossless = args.crf !== undefined && Number(args.crf) === 0; // lossless бывает только в High 4:4:4
-  ff.push('-c:v', 'libx264', '-preset', args['x264-preset'] || 'medium', ...(lossless ? [] : ['-profile:v', 'high']), '-pix_fmt', 'yuv420p', '-g', String(gop), '-bf', '2', ...color);
-  if (args.crf) ff.push('-crf', String(args.crf));
-  else ff.push('-b:v', String(bitrate), '-maxrate', String(Math.round(bitrate * 1.5)), '-bufsize', String(bitrate * 2));
-}
-if (files.audio) ff.push(...plan.args);
-ff.push(out);
-
+const ff = ffmpegArgs({ encoder, vp9, W, H, fps, bitrate, gop, crf: args.crf, x264Preset: args['x264-preset'], audio: files.audio, plan, startFrame, count, partial, out });
 log(`  кодировщик: ${encoder === 'webcodecs' ? `WebCodecs ${wcCodec}${wcHw === 'prefer-hardware' ? ' (аппаратно)' : ''} → ffmpeg без перекодирования` : encoder === 'videotoolbox' ? 'сырые кадры → ffmpeg h264_videotoolbox' : 'сырые кадры → ffmpeg libx264'}`);
 log(`  видео: ${args.crf && encoder === 'x264' ? `CRF ${args.crf}` : `${(bitrate / 1e6).toFixed(0)} Мбит/с`}, ключевой кадр каждые ${gop} кадров`);
 log(`  звук: ${files.audio ? `${path.basename(files.audio)}: ${plan.desc}` : 'нет'}`);
 log(`  кадры ${startFrame}…${startFrame + count - 1}${partial ? ' (часть ролика)' : ''}`);
 log(`  → ${out}`);
 
-const ffp = spawn('ffmpeg', ff, { stdio: ['pipe', 'inherit', 'pipe'] });
-let ffErr = '';
-ffp.stderr.on('data', d => { ffErr += d; if (ffErr.length > 1e5) ffErr = ffErr.slice(-5e4); });
-const ffDone = new Promise((res, rej) => ffp.on('close', code => { if (sink) sink.failed = code !== 0; code === 0 ? res() : rej(new Error(`ffmpeg завершился с кодом ${code}\n${ffErr.slice(-3000)}`)); }));
-ffDone.catch(() => { }); // ошибку покажем ниже, когда дождёмся ffmpeg
-ffp.stdin.on('error', () => { }); // если ffmpeg упал, ошибку покажет ffDone
-sink = { stream: ffp.stdin };
+const job = startFfmpeg(ff);
+sink = job;
 
 const t0 = Date.now();
 await page.exposeFunction('__vsProgress', ({ done, total, sec, bytes }) => {
@@ -321,38 +215,17 @@ try {
     bitrate, gop, start: startFrame, count, sinkUrl: `${base}/__sink`,
   });
 } catch (e) {
-  ffp.stdin.destroy(); let ffMsg = '';
-  await ffDone.catch(err => { ffMsg = '\n' + err.message; });
+  job.kill(); let ffMsg = '';
+  await job.done.catch(err => { if (!/SIGKILL|null/.test(err.message)) ffMsg = '\n' + err.message; });
   await cleanup(); die(e.message + ffMsg);
 }
-ffp.stdin.end();
-try { await ffDone; } catch (e) { await cleanup(); die(e.message); }
+job.end();
+try { await job.done; } catch (e) { await cleanup(); die(e.message); }
 await cleanup();
 const wall = (Date.now() - t0) / 1000;
 process.stdout.write('\n');
 
 // ---------- проверки ----------
-const size = fs.statSync(out).size;
-const probe = ffprobeJSON(out, ['-count_packets']);
-const vs = probe.streams.find(s => s.codec_type === 'video');
-const as = probe.streams.find(s => s.codec_type === 'audio');
-const outDur = Number(probe.format.duration);
-log(`Готово за ${(wall / 60).toFixed(1)} мин: ${count} кадров, ${(count / wall).toFixed(1)} кадр/с, ×${(count / wall / fps).toFixed(2)} реального времени`);
-log(`  файл: ${(size / 1e6).toFixed(1)} МБ, ≈ ${(size / 1e6 / (count / fps / 60)).toFixed(0)} МБ на минуту, ${vs.codec_name} ${vs.profile || ''} ${vs.width}×${vs.height} ${vs.pix_fmt}, кадров ${vs.nb_read_packets}${Number(vs.nb_read_packets) === count ? ' ✓' : ` ✗ (ждали ${count})`}`);
-if (as) log(`  звук в файле: ${as.codec_name}, ${as.sample_rate} Гц, ${as.channels} кан., ${as.bits_per_raw_sample || as.bits_per_sample || '?'} бит`);
-log(`  длительность файла ${outDur.toFixed(3)} с, аудио-исходник ${files.audio ? T.toFixed(3) + ' с' : '—'}`);
-
-if (files.audio && !partial && !args['no-verify']) {
-  const codec = md5Codec(plan.stream.sample_fmt);
-  const r = await comparePcm(files.audio, out, codec, plan.stream);
-  const same = r.same && (r.extra === 0 || !plan.stream.codec_name.startsWith('pcm_'));
-  const sr = Number(plan.stream.sample_rate);
-  log(`  звук бит-в-бит (md5 декодированного ${codec}, ${r.samples} сэмплов): ${same ? '✓ совпадает' : '✗ НЕ совпадает'}\n    исходник ${r.a}\n    ролик    ${r.b}`);
-  if (r.extra > 0) log(`    в конце дорожки ещё ${r.extra} сэмплов (${(1000 * r.extra / sr).toFixed(1)} мс): паддинг последнего кадра ${plan.stream.codec_name}, контейнер не хранит его обрезку. Сам звук не изменён.`);
-  if (plan.args[1] === 'copy' && !plan.stream.codec_name.startsWith('pcm_')) {
-    const [pa, pb] = await Promise.all([packetMd5(files.audio), packetMd5(out)]);
-    log(`  пакеты ${plan.stream.codec_name} (md5 сжатых данных): ${pa === pb ? '✓ совпадают' : '✗ различаются'}`);
-  }
-  try { const l = await loudness(files.audio); log(`  громкость исходника: ${l.I} LUFS, true peak ${l.TP} dBTP (для справки, звук не трогаем)`); } catch { }
-  if (!same) process.exitCode = 2;
-}
+const report = await verifyOutput({ out, count, fps, audio: args['no-verify'] ? null : files.audio, plan, partial, T, wall });
+for (const l of report.lines) log(l);
+if (!report.ok) process.exitCode = 2;
