@@ -64,7 +64,8 @@ function testHash() {
 // ---------- звук бит-в-бит для каждого формата ----------
 function testAudio() {
   for (const f of fs.readdirSync(DIR).filter(f => /\.(wav|aiff|flac|mp3|m4a)$/.test(f) && !f.includes('.vinyl'))) {
-    const r = render(['--preset', path.join(DIR, 'preset.json'), '--audio', path.join(DIR, f), '--res', '720', '--encoder', 'x264', '--x264-preset', 'ultrafast', '--out', path.join(DIR, 'audio-' + f.replace(/\./g, '_') + '.mov')]);
+    const enc = process.platform === 'darwin' ? ['--encoder', 'auto'] : ['--encoder', 'x264', '--x264-preset', 'ultrafast'];
+    const r = render(['--preset', path.join(DIR, 'preset.json'), '--audio', path.join(DIR, f), '--res', '720', ...enc, '--out', path.join(DIR, 'audio-' + f.replace(/\./g, '_') + '.mov')]);
     const o = r.stdout;
     const same = /звук бит-в-бит.*✓/.test(o);
     const frames = /кадров (\d+) ✓/.test(o);
@@ -75,12 +76,16 @@ function testAudio() {
   }
 }
 
-// ---------- скорость (1080p30, 20 с) ----------
+// ---------- скорость: 1080p30, VS_SPEED_SEC секунд (по умолчанию 60 на маке, 20 здесь), зум рассчитан на час ----------
 function testSpeed() {
-  for (const enc of (process.env.VS_SPEED_ENCODERS || 'x264').split(',')) {
-    const out = path.join(DIR, `speed-${enc}.mov`);
-    const r = render(['--preset', path.join(DIR, 'preset.json'), '--duration', '20', '--audio', path.join(DIR, 'wav24.wav'), '--limit', '20', '--encoder', enc, '--out', out]);
-    console.log(r.stdout.split('\n').filter(l => /Готово|файл:|GPU|кодировщик/.test(l)).join('\n'));
+  const mac = process.platform === 'darwin';
+  const sec = process.env.VS_SPEED_SEC || (mac ? '60' : '20');
+  for (const enc of (process.env.VS_SPEED_ENCODERS || (mac ? 'webcodecs,videotoolbox' : 'x264')).split(',')) {
+    const out = path.join(DIR, `speed-${enc}.mp4`);
+    const r = render(['--preset', path.join(DIR, 'preset.json'), '--audio', '', '--duration', '3600', '--limit', sec, '--encoder', enc, '--out', out]);
+    console.log(`[${enc}]\n` + r.stdout.split('\n').filter(l => /Готово|файл:|GPU|кодировщик/.test(l)).join('\n'));
+    const fps = Number(/([\d.]+) кадр\/с, ×/.exec(r.stdout)?.[1]);
+    if (fps) console.log(`  → час видео 1080p30 займёт ≈ ${(108000 / fps / 60).toFixed(0)} мин`);
   }
 }
 
@@ -91,12 +96,17 @@ function testWebcodecs() {
   const r = render(['--preset', path.join(DIR, 'preset.json'), '--encoder', 'webcodecs', '--codec', codec, '--res', '720', '--out', out]);
   console.log(r.stdout.split('\n').filter(l => /Готово|файл:|кодировщик|бит-в-бит/.test(l)).join('\n'));
   ok(/бит-в-бит.*✓/.test(r.stdout) && /кадров \d+ ✓/.test(r.stdout), `WebCodecs ${codec}: поток собран без перекодирования, звук и число кадров верны`);
-  // кадр из файла совпадает с кадром из raw-пути по построению? сравним PSNR с x264-версией
   const ref = path.join(DIR, 'wc-ref.mov');
-  render(['--preset', path.join(DIR, 'preset.json'), '--encoder', 'x264', '--crf', '0', '--x264-preset', 'ultrafast', '--res', '720', '--out', ref]);
-  const psnr = sh('ffmpeg', ['-i', out, '-i', ref, '-map', '0:v', '-map', '1:v', '-lavfi', 'psnr', '-f', 'null', '-']).stderr;
-  const avg = /average:([\d.inf]+)/.exec(psnr)?.[1];
-  ok(Number(avg) > 30 || avg === 'inf', `WebCodecs против lossless-эталона: PSNR ${avg} дБ (цвета и геометрия совпадают)`);
+  try { render(['--preset', path.join(DIR, 'preset.json'), '--encoder', 'x264', '--crf', '0', '--x264-preset', 'ultrafast', '--res', '720', '--out', ref]); }
+  catch (e) { console.log('  (сравнение с эталоном пропущено: в этом ffmpeg нет libx264)'); return; }
+  // зерно не сжимается, поэтому сравниваем размытые уменьшенные кадры: остаются цвета, геометрия и фаза вращения.
+  // Каждый кадр ролика должен быть ближе всего к кадру эталона с тем же номером.
+  const grab = (f) => { const r = spawnSync('ffmpeg', ['-v', 'error', '-i', f, '-vf', 'select=lt(n\\,24),gblur=sigma=3,scale=160:90', '-vsync', '0', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { maxBuffer: 1 << 26 }); return Array.from({ length: 24 }, (_, i) => r.stdout.subarray(i * 14400, (i + 1) * 14400)); };
+  const A = grab(out), B = grab(ref);
+  const mad = (x, y) => { let s = 0; for (let i = 0; i < x.length; i++) s += Math.abs(x[i] - y[i]); return s / x.length; };
+  let aligned = 0, worst = 0;
+  A.forEach((a, i) => { const d = B.map(b => mad(a, b)); const best = d.indexOf(Math.min(...d)); if (best === i) aligned++; worst = Math.max(worst, d[i]); });
+  ok(aligned === A.length && worst < 2, `WebCodecs против lossless-эталона: ${aligned}/${A.length} кадров совпали по номеру, макс. ошибка после размытия ${worst.toFixed(2)}/255`);
 }
 
 if (what === 'all' || what === 'assets' || !fs.existsSync(path.join(DIR, 'preset.json'))) await makeAssets();

@@ -77,6 +77,7 @@
       <button id="bEnd" title="За 5 с до конца (End)">⏭</button>
       <input id="seekbar" type="range" min="0" max="1" step="0.000001" value="0">
       <span id="time"></span>
+      <label class="check" title="Превью в половинном разрешении, если не хватает скорости. PNG и рендер всегда в полном."><input type="checkbox" id="halfRes"> превью ½</label>
     </div>
     <div id="status"><span id="stFps"></span><span id="stZoom"></span><span id="stFrame"></span><span id="stGpu"></span></div>
   </section>
@@ -481,8 +482,13 @@ const state = {
   audioDur: 0,                                       // длительность аудио, с (0 = нет)
   duration: null,                                    // принудительная длительность (render.mjs)
   placeholders: !RENDER_MODE,
-  geo: null, texKey: {},
+  geo: null, texKey: {}, previewScale: 1, fullRes: false,
 };
+// Размер холста: в превью можно рисовать в половинном разрешении (все размеры в долях H, так что кадр тот же)
+function outSize() {
+  const { W, H } = parseRes(state.p.res), k = RENDER_MODE || state.fullRes ? 1 : state.previewScale;
+  return k === 1 ? { W, H } : { W: Math.round(W * k / 8) * 8, H: Math.round(H * k / 4) * 4 };
+}
 function durationOf() {
   if (state.duration) return state.duration;
   if (state.audioDur > 0) return state.audioDur;
@@ -492,7 +498,7 @@ function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 25
 
 // Геометрия, не зависящая от времени, и текстуры под неё
 function prepare() {
-  const p = state.p, { W, H } = parseRes(p.res);
+  const p = state.p, { W, H } = outSize();
   R.setSize(W, H);
   const srcBg = state.src.bg || (state.placeholders ? (state._phBg ||= placeholderBg()) : null);
   const srcDisk = state.src.disk || (state.placeholders ? (state._phDisk ||= placeholderDisk()) : null);
@@ -543,7 +549,7 @@ function prepare() {
 
 // Полное состояние кадра в момент t: чистая функция параметров и времени
 function frameState(t) {
-  const p = state.p, g = state.geo, T = durationOf(), { H } = parseRes(p.res);
+  const p = state.p, g = state.geo, T = durationOf(), { H } = outSize();
   return {
     bgCover: g.bgCover, bgAnchor: g.bgAnchor, zoom: zoomAt(p, t, T),
     diskC: g.diskC, diskR: g.diskR, angle: angleAt(p, t),
@@ -580,10 +586,14 @@ window.VS = {
   },
   seek,
   async hashFrame(n) { seek(n / state.p.fps); return sha256hex(R.readRGBA()); },
-  async pngFrame(n) { seek(n / state.p.fps); const b = await new Promise(r => cv.toBlob(r, 'image/png')); return new Uint8Array(await b.arrayBuffer()); },
+  pngFrame(n) { seek(n / state.p.fps); return cv.toDataURL('image/png').split(',')[1]; },
   async h264Support(W, H, fps, bitrate) {
     if (typeof VideoEncoder === 'undefined') return { supported: false, reason: 'нет WebCodecs' };
-    for (const codec of ['avc1.640033', 'avc1.640032', 'avc1.640028']) {
+    // H.264 High, уровень по размеру и частоте кадров (макс. макроблоков в секунду), дальше запасные
+    const mbps = Math.ceil(W / 16) * Math.ceil(H / 16) * fps;
+    const levels = [[245760, '28'], [522240, '2a'], [589824, '32'], [983040, '33'], [2073600, '34']];
+    const first = (levels.find(([m]) => mbps <= m) || levels[levels.length - 1])[1];
+    for (const codec of [...new Set([first, '33', '34'])].map(l => 'avc1.6400' + l)) {
       for (const hardwareAcceleration of ['prefer-hardware', 'no-preference']) {
         const cfg = { codec, width: W, height: H, bitrate, framerate: fps, hardwareAcceleration, avc: { format: 'annexb' } };
         try { const s = await VideoEncoder.isConfigSupported(cfg); if (s.supported) return { supported: true, codec, hardwareAcceleration }; } catch (e) { }
@@ -622,9 +632,12 @@ window.VS = {
         report(i + 1);
       }
     } else {
-      const ivf = o.codec.startsWith('vp');
+      const ivf = o.codec.startsWith('vp'); let lastTs = -1;
       const enc = new VideoEncoder({
         output: (chunk) => {
+          // render.mjs ставит pts = dts = номер кадра, поэтому кадры должны идти по порядку (без B-кадров)
+          if (chunk.timestamp <= lastTs) err ||= new Error('энкодер переставляет кадры (B-кадры): так поток без перекодирования не собрать, используй --encoder videotoolbox');
+          lastTs = chunk.timestamp;
           const hdr = ivf ? 12 : 0, buf = new Uint8Array(chunk.byteLength + hdr);
           chunk.copyTo(ivf ? buf.subarray(12) : buf);
           if (ivf) { const dv = new DataView(buf.buffer); dv.setUint32(0, chunk.byteLength, true); dv.setBigUint64(4, BigInt(Math.round(chunk.timestamp * fps / 1e6)), true); }
@@ -683,8 +696,15 @@ function fmt(t) {
 }
 function currentT() {
   if (!clock.playing) return clock.t;
-  if (state.audioDur > 0) return audio.currentTime;
-  return clock.t0 + (performance.now() - clock.wall0) / 1000;
+  const now = performance.now();
+  if (state.audioDur > 0 && clock.audioOk) {
+    const at = audio.currentTime;
+    if (at !== clock.lastAT) { clock.lastAT = at; clock.lastATwall = now; return at; }
+    if (now - clock.lastATwall < 400) return at;
+    // звук стоит (нет устройства вывода и т. п.) — дальше идём по своим часам
+    clock.audioOk = false; clock.t0 = at; clock.wall0 = clock.lastATwall;
+  }
+  return clock.t0 + (now - clock.wall0) / 1000;
 }
 function setT(t) {
   const T = durationOf(); t = Math.min(Math.max(0, t), T);
@@ -693,9 +713,17 @@ function setT(t) {
   redraw();
 }
 function play(on) {
+  if (!on && clock.playing) clock.t = currentT(); // запомнить позицию, пока часы ещё идут
   clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶';
-  if (on) { clock.t0 = clock.t; clock.wall0 = performance.now(); if (state.audioDur > 0) { audio.currentTime = clock.t; audio.play(); } loop(); }
-  else { clock.t = currentT(); if (state.audioDur > 0) audio.pause(); redraw(); }
+  if (on) {
+    clock.t0 = clock.t; clock.wall0 = performance.now(); clock.audioOk = false;
+    if (state.audioDur > 0) {
+      audio.currentTime = clock.t;
+      audio.play().then(() => { clock.t0 = currentT(); clock.wall0 = performance.now(); clock.lastAT = -1; clock.audioOk = clock.playing; }).catch(() => { $('stFps').textContent = 'звук не запустился, превью идёт по часам'; });
+    }
+    loop();
+  }
+  else { if (state.audioDur > 0) audio.pause(); redraw(); }
 }
 let fpsCount = 0, fpsT = performance.now(), fpsShown = 0;
 function redraw() {
@@ -804,7 +832,10 @@ function applyPreset(data) {
   for (const k of Object.keys(DEFAULTS)) if (k in params) state.p[k] = params[k];
   dirty = true; syncControls(); setT(clock.t);
 }
-function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+function download(data, name) {
+  const a = document.createElement('a'); a.href = typeof data === 'string' ? data : URL.createObjectURL(data); a.download = name; a.click();
+  if (typeof data !== 'string') setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
 function baseName() { return (state.names.disk || state.names.bg || 'vinyl-spin').replace(/\.[^.]+$/, ''); }
 
 function initUI() {
@@ -851,8 +882,10 @@ function initUI() {
     else if (e.code === 'End') setT(durationOf() - 5);
   });
 
-  $('bPng').onclick = () => { seek(currentT()); cv.toBlob(b => download(b, `${baseName()}-${frameIndex(state.p, currentT())}.png`), 'image/png'); };
-  $('bThumb').onclick = () => { seek(currentT()); const c = resample(cv, 0, 0, cv.width, cv.height, 1280, 720); c.toBlob(b => download(b, `${baseName()}-1280x720.png`), 'image/png'); };
+  const fullFrame = (fn) => { state.fullRes = true; dirty = true; seek(currentT()); const r = fn(); state.fullRes = false; dirty = true; redraw(); return r; };
+  $('bPng').onclick = () => fullFrame(() => { const url = cv.toDataURL('image/png'); download(url, `${baseName()}-${frameIndex(state.p, currentT())}.png`); });
+  $('bThumb').onclick = () => fullFrame(() => { const c = resample(cv, 0, 0, cv.width, cv.height, 1280, 720); download(c.toDataURL('image/png'), `${baseName()}-1280x720.png`); });
+  $('halfRes').onchange = (e) => { state.previewScale = e.target.checked ? 0.5 : 1; dirty = true; redraw(); };
   $('bSave').onclick = savePreset;
   $('presetIn').onchange = (e) => { const f = e.target.files[0]; if (f) f.text().then(t => applyPreset(JSON.parse(t))).catch(err => alert('Не читается пресет: ' + err.message)); e.target.value = ''; };
   $('bReset').onclick = () => { if (confirm('Вернуть все параметры по умолчанию?')) applyPreset(DEFAULTS); };

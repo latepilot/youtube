@@ -134,6 +134,7 @@ if (args.preset) {
   presetDir = path.dirname(pp);
 }
 function fileArg(kind) {
+  if (args[kind] === '') return null; // --audio "" — без звука, даже если он есть в пресете
   if (typeof args[kind] === 'string') return path.resolve(args[kind]);
   const f = preset.files[kind];
   return f ? path.resolve(presetDir, f) : null;
@@ -220,9 +221,9 @@ if (onlyFrame) {
   const n = Number(args.frame);
   if (args.hash) log(`  кадр ${n}: sha256 ${await page.evaluate(n => VS.hashFrame(n), n)}`);
   if (args.png) {
-    const bytes = await page.evaluate(async n => Array.from(await VS.pngFrame(n)), n);
+    const b64 = await page.evaluate(n => VS.pngFrame(n), n);
     const out = typeof args.png === 'string' ? path.resolve(args.png) : path.resolve(`frame-${n}.png`);
-    fs.writeFileSync(out, Buffer.from(bytes)); log(`  PNG: ${out}`);
+    fs.writeFileSync(out, Buffer.from(b64, 'base64')); log(`  PNG: ${out}`);
   }
   await cleanup(); process.exit(0);
 }
@@ -261,9 +262,9 @@ const color = ['-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace'
 const ff = ['-hide_banner', '-v', 'warning', '-stats_period', '5', '-y'];
 if (encoder === 'webcodecs') {
   if (vp9) ff.push('-f', 'ivf', '-i', 'pipe:0');
-  else ff.push('-fflags', '+genpts', '-f', 'h264', '-framerate', String(fps), '-i', 'pipe:0');
+  else ff.push('-thread_queue_size', '256', '-f', 'h264', '-framerate', String(fps), '-i', 'pipe:0');
 } else {
-  ff.push('-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-s', `${W}x${H}`, '-framerate', String(fps), ...color, '-i', 'pipe:0');
+  ff.push('-thread_queue_size', '256', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-s', `${W}x${H}`, '-framerate', String(fps), ...color, '-i', 'pipe:0');
 }
 if (files.audio) {
   if (partial) ff.push('-ss', (startFrame / fps).toFixed(6), '-t', (count / fps).toFixed(6));
@@ -273,7 +274,9 @@ ff.push('-map', '0:v:0');
 if (files.audio) ff.push('-map', '1:a:0');
 if (encoder === 'webcodecs') {
   ff.push('-c:v', 'copy');
-  if (!vp9) ff.push('-bsf:v', 'h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0');
+  // в сыром H.264 нет меток времени: ставим pts = dts = номер кадра (B-кадров нет, это проверяет браузер),
+  // и помечаем поток как BT.709 с ограниченным диапазоном — именно так кадры упакованы в I420
+  if (!vp9) ff.push('-bsf:v', `setts=ts=N:duration=1:time_base=1/${fps},h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0`, '-video_track_timescale', String(fps * 1000));
 } else if (encoder === 'videotoolbox') {
   ff.push('-c:v', 'h264_videotoolbox', '-profile:v', 'high', '-b:v', String(bitrate), '-g', String(gop), ...color);
 } else {
@@ -283,7 +286,7 @@ if (encoder === 'webcodecs') {
   else ff.push('-b:v', String(bitrate), '-maxrate', String(Math.round(bitrate * 1.5)), '-bufsize', String(bitrate * 2));
 }
 if (files.audio) ff.push(...plan.args);
-ff.push('-r', String(fps), out);
+ff.push(out);
 
 log(`  кодировщик: ${encoder === 'webcodecs' ? `WebCodecs ${wcCodec}${wcHw === 'prefer-hardware' ? ' (аппаратно)' : ''} → ffmpeg без перекодирования` : encoder === 'videotoolbox' ? 'сырые кадры → ffmpeg h264_videotoolbox' : 'сырые кадры → ffmpeg libx264'}`);
 log(`  видео: ${args.crf && encoder === 'x264' ? `CRF ${args.crf}` : `${(bitrate / 1e6).toFixed(0)} Мбит/с`}, ключевой кадр каждые ${gop} кадров`);
