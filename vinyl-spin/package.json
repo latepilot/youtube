@@ -1,0 +1,14 @@
+{
+  "name": "vinyl-spin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Редактор и рендерер YouTube-роликов «вращающаяся пластинка»",
+  "scripts": {
+    "render": "node render.mjs",
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}

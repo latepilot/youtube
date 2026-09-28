@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vinyl-spin</title>
+<style>
+  :root {
+    --bg: #111214; --panel: #1a1c1f; --panel2: #222529; --line: #2e3237;
+    --text: #e6e6e6; --muted: #8b9199; --accent: #7fe04a; --warn: #ffb347; --err: #ff6b6b;
+    --r: 8px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-size: 13px; }
+  body.render { background: #000; overflow: hidden; }
+  body.render #app { display: none; }
+  body.render #cv { position: fixed; left: 0; top: 0; width: auto; height: auto; }
+  #app { display: grid; grid-template-columns: 1fr 360px; height: 100vh; }
+  #stage { display: flex; flex-direction: column; min-width: 0; padding: 14px; gap: 10px; }
+  header { display: flex; align-items: baseline; gap: 12px; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+  header span { color: var(--muted); }
+  #viewport { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; border-radius: var(--r); overflow: hidden; position: relative; }
+  #viewport canvas { max-width: 100%; max-height: 100%; aspect-ratio: 16 / 9; display: block; }
+  #dropHint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(127,224,74,.15); border: 2px dashed var(--accent); border-radius: var(--r); font-size: 18px; pointer-events: none; }
+  body.dragging #dropHint { display: flex; }
+  #transport { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  #transport input[type=range] { flex: 1; min-width: 200px; }
+  #time { font-variant-numeric: tabular-nums; min-width: 190px; text-align: center; color: var(--muted); }
+  #time b { color: var(--text); font-weight: 500; }
+  #status { color: var(--muted); font-variant-numeric: tabular-nums; display: flex; gap: 16px; flex-wrap: wrap; }
+  button, .btn { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+  button:hover, .btn:hover { border-color: #4a5058; }
+  button.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+  #panel { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 10px 12px 40px; }
+  details { border-bottom: 1px solid var(--line); padding: 6px 0 10px; }
+  summary { cursor: pointer; font-weight: 600; padding: 4px 0; list-style: none; user-select: none; }
+  summary::before { content: "▸ "; color: var(--muted); }
+  details[open] summary::before { content: "▾ "; }
+  .row { display: grid; grid-template-columns: 1fr 74px; gap: 4px 8px; align-items: center; margin: 7px 0 2px; }
+  .row label { grid-column: 1 / -1; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+  .row label i { font-style: normal; color: #5d636b; cursor: pointer; }
+  .row label i:hover { color: var(--text); }
+  .row.wide { grid-template-columns: 1fr; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=number], select, input[type=text] { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; font: inherit; }
+  input[type=color] { width: 100%; height: 26px; background: none; border: 1px solid var(--line); border-radius: 5px; padding: 1px; }
+  .check { display: flex; gap: 8px; align-items: center; margin: 8px 0 2px; color: var(--muted); font-size: 12px; }
+  .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+  .drop { position: relative; border: 1px dashed #3c4148; border-radius: var(--r); padding: 8px; min-height: 84px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: var(--panel2) center / cover no-repeat; overflow: hidden; }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop b { font-size: 12px; text-shadow: 0 1px 3px #000; }
+  .drop small { color: #c9ced4; font-size: 11px; word-break: break-all; text-shadow: 0 1px 3px #000; margin-top: auto; }
+  .drop .x { position: absolute; right: 4px; top: 4px; padding: 0 6px; display: none; }
+  .drop.has .x { display: block; }
+  .drop input { display: none; }
+  .note { color: var(--muted); font-size: 11.5px; line-height: 1.45; margin: 6px 0; }
+  .note.warn { color: var(--warn); }
+  .note.ok { color: var(--accent); }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  textarea { width: 100%; min-height: 86px; background: #0c0d0f; color: #cfe; border: 1px solid var(--line); border-radius: 6px; font: 11.5px ui-monospace, Menlo, monospace; padding: 6px; resize: vertical; }
+  @media (max-width: 900px) { #app { grid-template-columns: 1fr; height: auto; } #viewport { min-height: 40vh; } #panel { border-left: 0; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="stage">
+    <header><h1>vinyl-spin</h1><span>фон + диск + логотип, зум на всю длину, плёночное зерно</span></header>
+    <div id="viewport"><canvas id="cv" width="1920" height="1080"></canvas><div id="dropHint">Брось файл на нужное поле справа</div></div>
+    <div id="transport">
+      <button id="bStart" title="В начало (Home)">⏮</button>
+      <button id="bBack" title="−10 с (Shift+←)">−10с</button>
+      <button id="bPrevF" title="−1 кадр (←)">−1к</button>
+      <button id="bPlay" class="primary" title="Пуск/пауза (пробел)">▶</button>
+      <button id="bNextF" title="+1 кадр (→)">+1к</button>
+      <button id="bFwd" title="+10 с (Shift+→)">+10с</button>
+      <button id="bEnd" title="За 5 с до конца (End)">⏭</button>
+      <input id="seekbar" type="range" min="0" max="1" step="0.000001" value="0">
+      <span id="time"></span>
+    </div>
+    <div id="status"><span id="stFps"></span><span id="stZoom"></span><span id="stFrame"></span><span id="stGpu"></span></div>
+  </section>
+
+  <aside id="panel">
+    <details open><summary>Файлы</summary>
+      <div class="drops">
+        <label class="drop" data-kind="bg"><b>Фон</b><small>перетащи картинку</small><button class="x" title="Убрать">×</button><input type="file" accept="image/*"></label>
+        <label class="drop" data-kind="disk"><b>Диск</b><small>перетащи картинку</small><button class="x" title="Убрать">×</button><input type="file" accept="image/*"></label>
+        <label class="drop" data-kind="logo"><b>Логотип</b><small>PNG с прозрачностью</small><button class="x" title="Убрать">×</button><input type="file" accept="image/*"></label>
+        <label class="drop" data-kind="audio"><b>Аудио</b><small>WAV / AIFF / FLAC / MP3</small><button class="x" title="Убрать">×</button><input type="file" accept="audio/*,.flac,.aif,.aiff,.wav"></label>
+      </div>
+      <p class="note">Пока файлов нет, показываются заглушки. Длина ролика = длина аудио; без аудио берётся поле «Длительность».</p>
+    </details>
+    <div id="controls"></div>
+    <details open><summary>Экспорт</summary>
+      <div class="btns">
+        <button id="bPng" class="primary">PNG кадра</button>
+        <button id="bThumb">Обложка 1280×720</button>
+        <button id="bSave">Сохранить пресет</button>
+        <label class="btn">Загрузить пресет<input id="presetIn" type="file" accept=".json,application/json" hidden></label>
+        <button id="bReset">Сбросить</button>
+      </div>
+      <p class="note" id="sizeNote"></p>
+      <p class="note">Ролик рендерит <code>render.mjs</code> тем же кодом, что превью. Сохрани пресет рядом с файлами и запусти в папке vinyl-spin:</p>
+      <textarea id="cmd" readonly></textarea>
+      <div class="btns"><button id="bCaps">Проверить H.264 в этом браузере</button></div>
+      <p class="note" id="capsNote"></p>
+    </details>
+  </aside>
+</div>
+<canvas id="cvRender" hidden></canvas>
+
+<script>
+'use strict';
+/* ==========================================================================
+   Параметры. Все размеры в долях высоты кадра H, так они не зависят от разрешения.
+   Значения по умолчанию сняты с кадра-образца (docs/handoff.md §2).
+   ========================================================================== */
+const DEFAULTS = Object.freeze({
+  res: '1920x1080', fps: 30, durMin: 60,
+  diskDiam: 0.90, diskX: 0, diskY: 0, rpm: 100 / 3, dir: 1, startDeg: 0,
+  imgScale: 1, imgX: 0, imgY: 0, shutter: 0, blurN: 16,
+  holeDiam: 0.073, holeMode: 'color', holeColor: '#c0c0c0', holeGrain: true,
+  zoomFrom: 1.0, zoomTo: 1.15, zoomCurve: 'linear', bgX: 0, bgY: 0,
+  grainAmt: 0.065, grainSize: 2.5, grainMode: 'add', grainSeed: 1,
+  logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
+  bitrate: 25, gopSec: 0.5,
+});
+
+// Схема панели: из неё строятся бегунки. k — множитель для показа (0.9 → 90 %).
+const SCHEMA = [
+  { title: 'Кадр', open: true, items: [
+    { key: 'res', label: 'Разрешение', type: 'select', options: [['1920x1080', '1920×1080 (1080p)'], ['2560x1440', '2560×1440 (1440p)'], ['3840x2160', '3840×2160 (4K)'], ['1280x720', '1280×720']] },
+    { key: 'fps', label: 'Кадров в секунду', type: 'select', num: true, options: [[25, '25'], [30, '30'], [50, '50'], [60, '60']] },
+    { key: 'durMin', label: 'Длительность без аудио, мин', min: 0.1, max: 180, step: 0.1 },
+  ]},
+  { title: 'Диск', open: true, items: [
+    { key: 'diskDiam', label: 'Диаметр, % высоты', min: 0.1, max: 1.2, step: 0.001, k: 100 },
+    { key: 'rpm', label: 'Скорость, об/мин (33⅓ = один оборот за 1,8 с)', min: 0, max: 90, step: 0.001 },
+    { key: 'dir', label: 'Направление', type: 'select', num: true, options: [[1, 'по часовой'], [-1, 'против часовой']] },
+    { key: 'diskX', label: 'Сдвиг по X, % высоты', min: -0.8, max: 0.8, step: 0.001, k: 100 },
+    { key: 'diskY', label: 'Сдвиг по Y, % высоты', min: -0.5, max: 0.5, step: 0.001, k: 100 },
+    { key: 'startDeg', label: 'Начальный угол, °', min: -180, max: 180, step: 0.1 },
+    { key: 'imgScale', label: 'Масштаб картинки в круге', min: 0.5, max: 3, step: 0.001 },
+    { key: 'imgX', label: 'Сдвиг картинки X', min: -0.5, max: 0.5, step: 0.001 },
+    { key: 'imgY', label: 'Сдвиг картинки Y', min: -0.5, max: 0.5, step: 0.001 },
+    { key: 'shutter', label: 'Выдержка (размытие движения), ° затвора', min: 0, max: 360, step: 1 },
+    { key: 'blurN', label: 'Выборок размытия', min: 2, max: 64, step: 1 },
+  ]},
+  { title: 'Дырка', open: true, items: [
+    { key: 'holeDiam', label: 'Диаметр, % диска', min: 0, max: 0.4, step: 0.0005, k: 100 },
+    { key: 'holeMode', label: 'Режим', type: 'select', options: [['color', 'заливка цветом'], ['transparent', 'прозрачная (виден фон)']] },
+    { key: 'holeColor', label: 'Цвет', type: 'color' },
+    { key: 'holeGrain', label: 'Зерно на заливке', type: 'check' },
+  ]},
+  { title: 'Фон и зум', open: true, items: [
+    { key: 'zoomFrom', label: 'Масштаб в начале', min: 1, max: 2, step: 0.001 },
+    { key: 'zoomTo', label: 'Масштаб в конце', min: 1, max: 2, step: 0.001 },
+    { key: 'zoomCurve', label: 'Кривая', type: 'select', options: [['linear', 'линейно'], ['easeInOut', 'плавно в начале и в конце'], ['easeOut', 'плавно в конце'], ['easeIn', 'плавно в начале']] },
+    { key: 'bgX', label: 'Точка зума X (−1…1)', min: -1, max: 1, step: 0.001 },
+    { key: 'bgY', label: 'Точка зума Y (−1…1)', min: -1, max: 1, step: 0.001 },
+  ]},
+  { title: 'Зерно', open: true, items: [
+    { key: 'grainAmt', label: 'Сила, % (СКО яркости)', min: 0, max: 0.25, step: 0.001, k: 100 },
+    { key: 'grainSize', label: 'Размер, px при 1080p', min: 1, max: 4, step: 0.01 },
+    { key: 'grainMode', label: 'Наложение', type: 'select', options: [['add', 'добавить'], ['soft', 'мягкий свет (слабее в тенях и светах)']] },
+    { key: 'grainSeed', label: 'Seed', min: 0, max: 9999, step: 1 },
+  ]},
+  { title: 'Логотип', open: false, items: [
+    { key: 'logoSize', label: 'Высота, % высоты кадра', min: 0.02, max: 0.4, step: 0.001, k: 100 },
+    { key: 'logoRight', label: 'Отступ справа, % высоты', min: 0, max: 0.3, step: 0.001, k: 100 },
+    { key: 'logoBottom', label: 'Отступ снизу, % высоты', min: 0, max: 0.3, step: 0.001, k: 100 },
+    { key: 'logoOpacity', label: 'Непрозрачность', min: 0, max: 1, step: 0.01, k: 100 },
+  ]},
+  { title: 'Видео для рендера', open: false, items: [
+    { key: 'bitrate', label: 'Битрейт, Мбит/с', min: 4, max: 120, step: 1 },
+    { key: 'gopSec', label: 'Ключевой кадр каждые, с', min: 0.1, max: 10, step: 0.1 },
+  ]},
+];
+
+/* ==========================================================================
+   Время → состояние кадра. Чистые функции, без Math.random и таймеров.
+   ========================================================================== */
+const EASE = {
+  linear: u => u,
+  easeInOut: u => 0.5 - 0.5 * Math.cos(Math.PI * u),
+  easeOut: u => Math.sin(0.5 * Math.PI * u),
+  easeIn: u => 1 - Math.cos(0.5 * Math.PI * u),
+};
+function parseRes(r) { const [w, h] = String(r).split('x').map(Number); return { W: w, H: h }; }
+function zoomAt(p, t, T) {
+  const u = T > 0 ? Math.min(1, Math.max(0, t / T)) : 0;
+  return p.zoomFrom + (p.zoomTo - p.zoomFrom) * (EASE[p.zoomCurve] || EASE.linear)(u);
+}
+function angleAt(p, t) {
+  // угол считаем в double и сворачиваем по модулю 2π: на часе ролика float32 в шейдере уже теряет точность
+  const turns = p.dir * p.rpm / 60 * t + p.startDeg / 360;
+  return (turns - Math.floor(turns)) * 2 * Math.PI;
+}
+function frameIndex(p, t) { return Math.floor(t * p.fps + 1e-6); }
+
+/* ==========================================================================
+   WebGL2-рендерер
+   ========================================================================== */
+const VS_SRC = `#version 300 es
+void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
+
+const FS_COMPOSITE = `#version 300 es
+precision highp float; precision highp int;
+uniform vec2 uRes;
+uniform sampler2D uBg, uDisk, uLogo;
+uniform vec2 uBgCover; uniform float uBgScale; uniform vec2 uBgAnchor;
+uniform vec2 uDiskC; uniform float uDiskR; uniform float uAngle; uniform float uBlurAng; uniform int uBlurN;
+uniform float uImgScale; uniform vec2 uImgOff;
+uniform float uHoleR; uniform int uHoleMode; uniform vec3 uHoleColor; uniform int uHoleGrain;
+uniform float uGrainAmt, uGrainSize; uniform int uGrainMode; uniform uint uGrainFrame, uSeed;
+uniform vec4 uLogoRect; uniform float uLogoOpacity; uniform int uHasLogo;
+out vec4 o;
+
+// pcg3d (Jarzynski, Olano 2020): три независимых 32-битных хэша за один вызов, целочисленно и детерминированно
+uvec3 pcg3d(uvec3 v){
+  v = v * 1664525u + 1013904223u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  v ^= v >> 16u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  return v;
+}
+// приближённо гауссов шум с СКО 1: сумма трёх равномерных
+float gauss(ivec2 c){
+  vec3 u = vec3(pcg3d(uvec3(uvec2(c), uGrainFrame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0);
+  return (u.x + u.y + u.z - 1.5) * 2.0;
+}
+float grain(vec2 p){
+  if (uGrainSize <= 1.0001) return gauss(ivec2(floor(p)));
+  // решётку поворачиваем, чтобы не было видно горизонталей и вертикалей
+  vec2 q = mat2(0.8660254, 0.5, -0.5, 0.8660254) * p / uGrainSize; vec2 i = floor(q); vec2 f = q - i; f = f * f * (3.0 - 2.0 * f);
+  ivec2 c = ivec2(i);
+  float a = gauss(c), b = gauss(c + ivec2(1, 0)), d = gauss(c + ivec2(0, 1)), e = gauss(c + ivec2(1, 1));
+  vec2 g = 1.0 - f;
+  float w0 = g.x * g.y, w1 = f.x * g.y, w2 = g.x * f.y, w3 = f.x * f.y;
+  // нормируем, чтобы СКО не зависела от положения внутри ячейки
+  return (a * w0 + b * w1 + d * w2 + e * w3) * inversesqrt(w0 * w0 + w1 * w1 + w2 * w2 + w3 * w3);
+}
+vec3 applyGrain(vec3 c, float n){
+  if (uGrainMode == 1) return c + uGrainAmt * n * 2.0 * sqrt(max(c * (1.0 - c), 0.0));
+  return c + uGrainAmt * n;
+}
+vec2 rot(vec2 v, float a){ float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
+vec3 diskSample(vec2 q, float a){
+  vec2 r = rot(q, -a);
+  return texture(uDisk, r / (2.0 * uDiskR * uImgScale) + 0.5 + uImgOff).rgb;
+}
+void main(){
+  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y); // пиксели, y вниз
+  // фон: cover-fit, зум вокруг центра кадра
+  vec2 uv = uBgAnchor + (p - 0.5 * uRes) / (uBgCover * uBgScale);
+  vec3 bg = texture(uBg, uv).rgb;
+  float n = uGrainAmt > 0.0 ? grain(p) : 0.0;
+  vec3 col = applyGrain(bg, n);
+
+  vec2 q = p - uDiskC;
+  float d = length(q);
+  float cov = clamp(uDiskR - d + 0.5, 0.0, 1.0);
+  if (cov > 0.0) {
+    vec3 dc;
+    if (uBlurN > 1 && uBlurAng > 0.0) {
+      dc = vec3(0.0);
+      for (int i = 0; i < 64; i++) {
+        if (i >= uBlurN) break;
+        dc += diskSample(q, uAngle + uBlurAng * ((float(i) + 0.5) / float(uBlurN) - 0.5));
+      }
+      dc /= float(uBlurN);
+    } else dc = diskSample(q, uAngle);
+    float hc = clamp(uHoleR - d + 0.5, 0.0, 1.0);
+    vec3 hole = uHoleMode == 1 ? col : (uHoleGrain == 1 ? applyGrain(uHoleColor, n) : uHoleColor);
+    col = mix(col, mix(dc, hole, hc), cov);
+  }
+  if (uHasLogo == 1) {
+    vec2 lu = (p - uLogoRect.xy) / uLogoRect.zw;
+    if (all(greaterThanEqual(lu, vec2(0.0))) && all(lessThan(lu, vec2(1.0)))) {
+      vec4 l = texture(uLogo, lu) * uLogoOpacity; // premultiplied
+      col = col * (1.0 - l.a) + l.rgb;
+    }
+  }
+  o = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+// Упаковка RGBA-кадра в I420 (BT.709, ограниченный диапазон) прямо на GPU:
+// выход шириной W/4 и высотой 1,5·H, каждый тексель = 4 байта плоскости. readPixels отдаёт готовый yuv420p.
+const FS_PACK = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D uSrc; uniform ivec2 uSize;
+out vec4 o;
+vec3 px(int x, int y){ return texelFetch(uSrc, ivec2(x, uSize.y - 1 - y), 0).rgb; }
+float Y(vec3 c){ return (16.0 + 219.0 * dot(c, vec3(0.2126, 0.7152, 0.0722))) / 255.0; }
+vec2 UV(int cx, int cy){
+  vec3 c = 0.25 * (px(2 * cx, 2 * cy) + px(2 * cx + 1, 2 * cy) + px(2 * cx, 2 * cy + 1) + px(2 * cx + 1, 2 * cy + 1));
+  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  return (128.0 + 224.0 * vec2((c.b - y) / 1.8556, (c.r - y) / 1.5748)) / 255.0;
+}
+void main(){
+  int W = uSize.x, H = uSize.y;
+  int tx = int(gl_FragCoord.x), ty = int(gl_FragCoord.y);
+  if (ty < H) { int x = tx * 4; o = vec4(Y(px(x, ty)), Y(px(x + 1, ty)), Y(px(x + 2, ty)), Y(px(x + 3, ty))); return; }
+  int k = ty - H; int plane = k / (H / 4); k -= plane * (H / 4);
+  int hw = W / 8; int cy = 2 * k + (tx >= hw ? 1 : 0); int cx = (tx % hw) * 4;
+  vec4 r;
+  for (int i = 0; i < 4; i++) { vec2 uv = UV(cx + i, cy); r[i] = plane == 0 ? uv.x : uv.y; }
+  o = r;
+}`;
+
+class Renderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+    if (!gl) throw new Error('WebGL2 недоступен');
+    this.gl = gl;
+    this.comp = this.program(FS_COMPOSITE);
+    this.pack = this.program(FS_PACK);
+    this.vao = gl.createVertexArray();
+    this.tex = { bg: null, disk: null, logo: null };
+    this.texSize = { bg: [1, 1], disk: [1, 1], logo: [1, 1] };
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
+    this.aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+  }
+  program(fs) {
+    const gl = this.gl;
+    const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+    const p = gl.createProgram();
+    gl.attachShader(p, mk(gl.VERTEX_SHADER, VS_SRC)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) { const name = gl.getActiveUniform(p, i).name; u[name] = gl.getUniformLocation(p, name); }
+    return { p, u };
+  }
+  setSize(W, H) {
+    const gl = this.gl;
+    if (this.W === W && this.H === H) return;
+    this.W = W; this.H = H; this.canvas.width = W; this.canvas.height = H;
+    for (const k of ['fbTex', 'packTex']) if (this[k]) gl.deleteTexture(this[k]);
+    for (const k of ['fb', 'packFb']) if (this[k]) gl.deleteFramebuffer(this[k]);
+    const mkTarget = (w, h) => {
+      const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      return [t, f];
+    };
+    [this.fbTex, this.fb] = mkTarget(W, H);
+    [this.packTex, this.packFb] = mkTarget(W / 4, H * 3 / 2);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  upload(kind, source, { mip = true, premul = false } = {}) {
+    const gl = this.gl;
+    if (this.tex[kind]) gl.deleteTexture(this.tex[kind]);
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, premul);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    if (mip) { gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); }
+    else gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    if (mip && this.aniso) gl.texParameterf(gl.TEXTURE_2D, this.aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+    this.tex[kind] = t; this.texSize[kind] = [source.width, source.height];
+  }
+  // рисует кадр в offscreen-буфер (и копирует на холст, если blit)
+  draw(s, blit = true) {
+    const gl = this.gl, { p, u } = this.comp;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb);
+    gl.viewport(0, 0, this.W, this.H);
+    gl.useProgram(p); gl.bindVertexArray(this.vao);
+    const bind = (unit, tex, name) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(u[name], unit); };
+    bind(0, this.tex.bg, 'uBg'); bind(1, this.tex.disk, 'uDisk'); bind(2, this.tex.logo, 'uLogo');
+    gl.uniform2f(u.uRes, this.W, this.H);
+    gl.uniform2f(u.uBgCover, s.bgCover[0], s.bgCover[1]); gl.uniform1f(u.uBgScale, s.zoom); gl.uniform2f(u.uBgAnchor, s.bgAnchor[0], s.bgAnchor[1]);
+    gl.uniform2f(u.uDiskC, s.diskC[0], s.diskC[1]); gl.uniform1f(u.uDiskR, s.diskR); gl.uniform1f(u.uAngle, s.angle);
+    gl.uniform1f(u.uBlurAng, s.blurAng); gl.uniform1i(u.uBlurN, s.blurN);
+    gl.uniform1f(u.uImgScale, s.imgScale); gl.uniform2f(u.uImgOff, s.imgOff[0], s.imgOff[1]);
+    gl.uniform1f(u.uHoleR, s.holeR); gl.uniform1i(u.uHoleMode, s.holeMode); gl.uniform3f(u.uHoleColor, ...s.holeColor); gl.uniform1i(u.uHoleGrain, s.holeGrain);
+    gl.uniform1f(u.uGrainAmt, s.grainAmt); gl.uniform1f(u.uGrainSize, s.grainSize); gl.uniform1i(u.uGrainMode, s.grainMode);
+    gl.uniform1ui(u.uGrainFrame, s.grainFrame >>> 0); gl.uniform1ui(u.uSeed, s.seed >>> 0);
+    gl.uniform4f(u.uLogoRect, ...s.logoRect); gl.uniform1f(u.uLogoOpacity, s.logoOpacity); gl.uniform1i(u.uHasLogo, s.hasLogo);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (blit) {
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+      gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  readRGBA() {
+    const gl = this.gl, out = new Uint8Array(this.W * this.H * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb); gl.readPixels(0, 0, this.W, this.H, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); return out;
+  }
+  // I420 последнего нарисованного кадра в out (W*H*1.5 байт)
+  readI420(out) {
+    const gl = this.gl, { p, u } = this.pack, w = this.W / 4, h = this.H * 3 / 2;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.packFb); gl.viewport(0, 0, w, h);
+    gl.useProgram(p); gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.fbTex); gl.uniform1i(u.uSrc, 0);
+    gl.uniform2i(u.uSize, this.W, this.H);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+}
+
+/* ==========================================================================
+   Картинки: заглушки и качественное уменьшение перед загрузкой в GPU
+   ========================================================================== */
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+function placeholderBg() {
+  const c = makeCanvas(2400, 1350), g = c.getContext('2d'), R = mulberry32(7);
+  g.fillStyle = '#6d6d6d'; g.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 38; i++) {
+    const v = Math.floor(30 + R() * 190); g.fillStyle = `rgb(${v},${v},${v})`;
+    g.save(); g.translate(R() * c.width, R() * c.height); g.rotate(R() * Math.PI);
+    g.beginPath();
+    if (R() < 0.5) g.ellipse(0, 0, 150 + R() * 520, 120 + R() * 380, 0, 0, Math.PI * 2);
+    else g.rect(-200 - R() * 400, -150 - R() * 300, 300 + R() * 700, 200 + R() * 500);
+    g.fill(); g.restore();
+  }
+  // бумажная фактура
+  const img = g.getImageData(0, 0, c.width, c.height), d = img.data, R2 = mulberry32(11);
+  for (let i = 0; i < d.length; i += 4) { const n = (R2() - 0.5) * 26; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+function placeholderDisk() {
+  const c = makeCanvas(1400, 1400), g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 1400, 1400);
+  gr.addColorStop(0, '#f2efe6'); gr.addColorStop(0.35, '#e0782f'); gr.addColorStop(0.6, '#c24d19'); gr.addColorStop(1, '#1aa3c4');
+  g.fillStyle = gr; g.fillRect(0, 0, 1400, 1400);
+  g.fillStyle = '#1aa3c4'; g.fillRect(0, 1050, 1400, 350);
+  g.fillStyle = 'rgba(255,255,255,.92)'; g.font = '600 84px -apple-system, Helvetica, Arial, sans-serif'; g.textBaseline = 'middle';
+  g.fillText('VINYL SPIN', 190, 700);
+  g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 6; g.beginPath(); g.moveTo(700, 80); g.lineTo(700, 330); g.stroke();
+  return c;
+}
+function placeholderLogo() {
+  const c = makeCanvas(512, 512), g = c.getContext('2d');
+  g.fillStyle = '#33ff14'; g.fillRect(0, 0, 512, 512);
+  g.fillStyle = '#111'; g.font = '900 150px -apple-system, Helvetica, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('LOGO', 256, 262);
+  return c;
+}
+
+// Уменьшение половинками с «high»-сглаживанием, потом последний шаг до точного размера.
+// Детерминировано на одной машине, так что превью и рендер получают одинаковые текстуры.
+function resample(src, sx, sy, sw, sh, dw, dh) {
+  dw = Math.max(1, Math.round(dw)); dh = Math.max(1, Math.round(dh));
+  let cur = src, cx = sx, cy = sy, cw = sw, ch = sh;
+  while (cw / 2 >= dw && ch / 2 >= dh) {
+    const nw = Math.round(cw / 2), nh = Math.round(ch / 2), c = makeCanvas(nw, nh), g = c.getContext('2d');
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+    g.drawImage(cur, cx, cy, cw, ch, 0, 0, nw, nh);
+    cur = c; cx = 0; cy = 0; cw = nw; ch = nh;
+  }
+  const c = makeCanvas(dw, dh), g = c.getContext('2d');
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+  g.drawImage(cur, cx, cy, cw, ch, 0, 0, dw, dh);
+  return c;
+}
+
+/* ==========================================================================
+   Состояние и сборка кадра
+   ========================================================================== */
+const RENDER_MODE = new URLSearchParams(location.search).has('render');
+const cv = document.getElementById('cv');
+const R = new Renderer(cv);
+const state = {
+  p: { ...DEFAULTS },
+  src: { bg: null, disk: null, logo: null },       // исходники (ImageBitmap / canvas)
+  names: { bg: '', disk: '', logo: '', audio: '' },
+  audioDur: 0,                                       // длительность аудио, с (0 = нет)
+  duration: null,                                    // принудительная длительность (render.mjs)
+  placeholders: !RENDER_MODE,
+  geo: null, texKey: {},
+};
+function durationOf() {
+  if (state.duration) return state.duration;
+  if (state.audioDur > 0) return state.audioDur;
+  return state.p.durMin * 60;
+}
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
+
+// Геометрия, не зависящая от времени, и текстуры под неё
+function prepare() {
+  const p = state.p, { W, H } = parseRes(p.res);
+  R.setSize(W, H);
+  const srcBg = state.src.bg || (state.placeholders ? (state._phBg ||= placeholderBg()) : null);
+  const srcDisk = state.src.disk || (state.placeholders ? (state._phDisk ||= placeholderDisk()) : null);
+  const srcLogo = state.src.logo || null;
+  const g = {};
+  // фон: cover, текстура уменьшается до размера при максимальном зуме (дальше мипмапы)
+  if (srcBg) {
+    const a = srcBg.width / srcBg.height;
+    g.bgCover = a > W / H ? [H * a, H] : [W, W / a];
+    const smax = Math.max(p.zoomFrom, p.zoomTo), smin = Math.min(p.zoomFrom, p.zoomTo);
+    const tw = Math.min(srcBg.width, g.bgCover[0] * smax), th = tw / a;
+    const key = [srcBg === state.src.bg ? state.names.bg : 'ph', srcBg.width, srcBg.height, Math.round(tw)].join('|');
+    if (state.texKey.bg !== key || !R.tex.bg) { R.upload('bg', tw < srcBg.width ? resample(srcBg, 0, 0, srcBg.width, srcBg.height, tw, th) : srcBg); state.texKey.bg = key; }
+    // якорь зума: при bgX/bgY = ±1 край кадра на минимальном масштабе совпадает с краем картинки
+    const m = [1 - W / (g.bgCover[0] * smin), 1 - H / (g.bgCover[1] * smin)];
+    g.bgAnchor = [0.5 + p.bgX * m[0] / 2, 0.5 + p.bgY * m[1] / 2];
+  } else {
+    if (state.texKey.bg !== 'black') { const c = makeCanvas(2, 2); c.getContext('2d').fillRect(0, 0, 2, 2); R.upload('bg', c); state.texKey.bg = 'black'; }
+    g.bgCover = [W, H]; g.bgAnchor = [0.5, 0.5];
+  }
+  // диск: квадратная вырезка по центру, уменьшенная до диаметра на экране
+  g.diskR = p.diskDiam * H / 2;
+  g.diskC = [W / 2 + p.diskX * H, H / 2 + p.diskY * H];
+  if (srcDisk) {
+    const side = Math.min(srcDisk.width, srcDisk.height);
+    const px = Math.min(side, Math.round(2 * g.diskR * p.imgScale * 1.0), 4096);
+    const key = [srcDisk === state.src.disk ? state.names.disk : 'ph', srcDisk.width, srcDisk.height, px].join('|');
+    if (state.texKey.disk !== key || !R.tex.disk) {
+      R.upload('disk', resample(srcDisk, (srcDisk.width - side) / 2, (srcDisk.height - side) / 2, side, side, px, px));
+      state.texKey.disk = key;
+    }
+  } else if (state.texKey.disk !== 'none') { const c = makeCanvas(2, 2); const x = c.getContext('2d'); x.fillStyle = '#444'; x.fillRect(0, 0, 2, 2); R.upload('disk', c); state.texKey.disk = 'none'; }
+  // логотип: целые пиксели, без мипмапов, чтобы оставался резким
+  g.hasLogo = 0; g.logoRect = [0, 0, 1, 1];
+  const logo = srcLogo || (state.placeholders && !state.logoCleared ? (state._phLogo ||= placeholderLogo()) : null);
+  if (logo) {
+    const lh = Math.max(1, Math.round(p.logoSize * H)), lw = Math.max(1, Math.round(lh * logo.width / logo.height));
+    const x0 = Math.round(W - p.logoRight * H - lw), y0 = Math.round(H - p.logoBottom * H - lh);
+    const key = [logo === state.src.logo ? state.names.logo : 'ph', logo.width, logo.height, lw, lh].join('|');
+    if (state.texKey.logo !== key || !R.tex.logo) {
+      R.upload('logo', lw === logo.width && lh === logo.height ? logo : resample(logo, 0, 0, logo.width, logo.height, lw, lh), { mip: false, premul: true });
+      state.texKey.logo = key;
+    }
+    g.hasLogo = 1; g.logoRect = [x0, y0, lw, lh];
+  } else if (!R.tex.logo) { R.upload('logo', makeCanvas(1, 1), { mip: false }); }
+  state.geo = g;
+}
+
+// Полное состояние кадра в момент t: чистая функция параметров и времени
+function frameState(t) {
+  const p = state.p, g = state.geo, T = durationOf(), { H } = parseRes(p.res);
+  return {
+    bgCover: g.bgCover, bgAnchor: g.bgAnchor, zoom: zoomAt(p, t, T),
+    diskC: g.diskC, diskR: g.diskR, angle: angleAt(p, t),
+    blurAng: p.shutter > 0 ? 2 * Math.PI * p.rpm / 60 * (p.shutter / 360) / p.fps : 0, blurN: Math.round(p.blurN),
+    imgScale: p.imgScale, imgOff: [p.imgX, p.imgY],
+    holeR: g.diskR * p.holeDiam, holeMode: p.holeMode === 'transparent' ? 1 : 0, holeColor: hexToRgb(p.holeColor), holeGrain: p.holeGrain ? 1 : 0,
+    grainAmt: p.grainAmt, grainSize: p.grainSize * H / 1080, grainMode: p.grainMode === 'soft' ? 1 : 0,
+    grainFrame: frameIndex(p, t), seed: Math.round(p.grainSeed),
+    logoRect: g.logoRect, logoOpacity: p.logoOpacity, hasLogo: g.hasLogo,
+  };
+}
+let dirty = true;
+function seek(t) {
+  if (dirty || !state.geo) { prepare(); dirty = false; }
+  R.draw(frameState(t));
+}
+
+/* ==========================================================================
+   API для render.mjs (Playwright)
+   ========================================================================== */
+async function loadImageBlob(blob) { return createImageBitmap(blob, { imageOrientation: 'from-image', premultiplyAlpha: 'none', colorSpaceConversion: 'default' }); }
+async function sha256hex(buf) { const h = await crypto.subtle.digest('SHA-256', buf); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+
+window.VS = {
+  DEFAULTS,
+  gpu: () => R.gpu,
+  setParams(obj) { Object.assign(state.p, obj); dirty = true; if (!RENDER_MODE) { syncControls(); redraw(); } },
+  getParams: () => ({ ...state.p }),
+  setDuration(sec) { state.duration = sec; },
+  async loadImage(kind, url, name = '') {
+    if (!url) { state.src[kind] = null; state.names[kind] = ''; }
+    else { const r = await fetch(url); if (!r.ok) throw new Error(`${kind}: ${r.status}`); state.src[kind] = await loadImageBlob(await r.blob()); state.names[kind] = name || url; }
+    dirty = true;
+  },
+  seek,
+  async hashFrame(n) { seek(n / state.p.fps); return sha256hex(R.readRGBA()); },
+  async pngFrame(n) { seek(n / state.p.fps); const b = await new Promise(r => cv.toBlob(r, 'image/png')); return new Uint8Array(await b.arrayBuffer()); },
+  async h264Support(W, H, fps, bitrate) {
+    if (typeof VideoEncoder === 'undefined') return { supported: false, reason: 'нет WebCodecs' };
+    for (const codec of ['avc1.640033', 'avc1.640032', 'avc1.640028']) {
+      for (const hardwareAcceleration of ['prefer-hardware', 'no-preference']) {
+        const cfg = { codec, width: W, height: H, bitrate, framerate: fps, hardwareAcceleration, avc: { format: 'annexb' } };
+        try { const s = await VideoEncoder.isConfigSupported(cfg); if (s.supported) return { supported: true, codec, hardwareAcceleration }; } catch (e) { }
+      }
+    }
+    return { supported: false, reason: 'H.264 в WebCodecs не поддерживается' };
+  },
+  // Основной цикл экспорта: кадры [start, start+count) уходят POST-запросами на sinkUrl.
+  // mode 'webcodecs' — кодирует сам браузер (H.264 annexb или VP9 в IVF), 'raw' — отдаёт yuv420p.
+  async exportRun(o) {
+    const p = state.p, fps = p.fps, { W, H } = parseRes(p.res);
+    seek(o.start / fps);
+    const batchBytes = o.batchBytes || 16 << 20;
+    let parts = [], partBytes = 0, inflight = Promise.resolve(), sentBytes = 0, err = null;
+    const send = () => {
+      if (!parts.length) return inflight;
+      const body = new Blob(parts); parts = []; partBytes = 0; sentBytes += body.size;
+      const prev = inflight;
+      inflight = prev.then(() => fetch(o.sinkUrl, { method: 'POST', body }).then(r => { if (!r.ok) throw new Error('sink ' + r.status); }));
+      return prev; // один запрос в полёте, пока рисуем следующую пачку
+    };
+    const push = (buf) => { parts.push(buf); partBytes += buf.byteLength; };
+    const t0 = performance.now(); let lastReport = t0;
+    const report = (i, final) => {
+      const now = performance.now();
+      if (!final && now - lastReport < 1000) return;
+      lastReport = now;
+      if (window.__vsProgress) window.__vsProgress({ done: i, total: o.count, sec: (now - t0) / 1000, bytes: sentBytes + partBytes });
+    };
+    if (o.mode === 'raw') {
+      const frameBytes = W * H * 3 / 2;
+      for (let i = 0; i < o.count; i++) {
+        seek((o.start + i) / fps);
+        const buf = new Uint8Array(frameBytes); R.readI420(buf); push(buf);
+        if (partBytes >= batchBytes) await send();
+        report(i + 1);
+      }
+    } else {
+      const ivf = o.codec.startsWith('vp');
+      const enc = new VideoEncoder({
+        output: (chunk) => {
+          const hdr = ivf ? 12 : 0, buf = new Uint8Array(chunk.byteLength + hdr);
+          chunk.copyTo(ivf ? buf.subarray(12) : buf);
+          if (ivf) { const dv = new DataView(buf.buffer); dv.setUint32(0, chunk.byteLength, true); dv.setBigUint64(4, BigInt(Math.round(chunk.timestamp * fps / 1e6)), true); }
+          push(buf);
+        },
+        error: (e) => { err = e; },
+      });
+      const cfg = { codec: o.codec, width: W, height: H, bitrate: o.bitrate, framerate: fps, latencyMode: 'quality' };
+      if (o.hardwareAcceleration) cfg.hardwareAcceleration = o.hardwareAcceleration;
+      if (!ivf) cfg.avc = { format: 'annexb' };
+      enc.configure(cfg);
+      if (ivf) { // заголовок IVF
+        const h = new Uint8Array(32), dv = new DataView(h.buffer);
+        h.set([68, 75, 73, 70]); dv.setUint16(4, 0, true); dv.setUint16(6, 32, true);
+        h.set(o.codec.startsWith('vp09') ? [86, 80, 57, 48] : [65, 86, 48, 49], 8);
+        dv.setUint16(12, W, true); dv.setUint16(14, H, true); dv.setUint32(16, fps, true); dv.setUint32(20, 1, true); dv.setUint32(24, o.count, true);
+        push(h);
+      }
+      const gop = Math.max(1, o.gop), yuv = new Uint8Array(W * H * 3 / 2);
+      for (let i = 0; i < o.count; i++) {
+        if (err) throw err;
+        const n = o.start + i;
+        seek(n / fps);
+        // отдаём энкодеру свой I420 (BT.709, ограниченный диапазон), а не холст:
+        // так цвета совпадают с запасным путём байт в байт и не зависят от конвертера Chrome
+        R.readI420(yuv);
+        const vf = new VideoFrame(yuv, { format: 'I420', codedWidth: W, codedHeight: H, timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps),
+          colorSpace: { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false } });
+        enc.encode(vf, { keyFrame: i % gop === 0 });
+        vf.close();
+        while (enc.encodeQueueSize > 6) await new Promise(r => enc.addEventListener('dequeue', r, { once: true }));
+        if (partBytes >= batchBytes) await send();
+        report(i + 1);
+      }
+      await enc.flush(); enc.close();
+      if (err) throw err;
+    }
+    await send(); await inflight;
+    report(o.count, true);
+    return { frames: o.count, sec: (performance.now() - t0) / 1000, bytes: sentBytes };
+  },
+};
+
+/* ==========================================================================
+   Интерфейс редактора (не нужен в режиме рендера)
+   ========================================================================== */
+const $ = (id) => document.getElementById(id);
+const clock = { t: 0, playing: false, wall0: 0, t0: 0 };
+const audio = new Audio(); audio.preload = 'auto';
+let audioUrl = null;
+const controls = {};
+
+function fmt(t) {
+  t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + s.toFixed(2).padStart(5, '0');
+}
+function currentT() {
+  if (!clock.playing) return clock.t;
+  if (state.audioDur > 0) return audio.currentTime;
+  return clock.t0 + (performance.now() - clock.wall0) / 1000;
+}
+function setT(t) {
+  const T = durationOf(); t = Math.min(Math.max(0, t), T);
+  clock.t = t; clock.t0 = t; clock.wall0 = performance.now();
+  if (state.audioDur > 0) audio.currentTime = t;
+  redraw();
+}
+function play(on) {
+  clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶';
+  if (on) { clock.t0 = clock.t; clock.wall0 = performance.now(); if (state.audioDur > 0) { audio.currentTime = clock.t; audio.play(); } loop(); }
+  else { clock.t = currentT(); if (state.audioDur > 0) audio.pause(); redraw(); }
+}
+let fpsCount = 0, fpsT = performance.now(), fpsShown = 0;
+function redraw() {
+  const t = currentT(), T = durationOf(), p = state.p;
+  seek(t);
+  $('seekbar').max = T; $('seekbar').value = t;
+  $('time').innerHTML = `<b>${fmt(t)}</b> / ${fmt(T)}`;
+  $('stZoom').textContent = `зум ×${zoomAt(p, t, T).toFixed(4)}`;
+  $('stFrame').textContent = `кадр ${frameIndex(p, t)} из ${Math.ceil(T * p.fps)}`;
+}
+function loop() {
+  if (!clock.playing) return;
+  let t = currentT();
+  if (t >= durationOf()) { clock.t = durationOf(); play(false); return; }
+  redraw();
+  fpsCount++; const now = performance.now();
+  if (now - fpsT > 1000) { fpsShown = fpsCount * 1000 / (now - fpsT); fpsCount = 0; fpsT = now; $('stFps').textContent = `превью ${fpsShown.toFixed(0)} fps`; }
+  requestAnimationFrame(loop);
+}
+
+function buildControls() {
+  const root = $('controls');
+  for (const sec of SCHEMA) {
+    const d = document.createElement('details'); d.open = sec.open;
+    d.innerHTML = `<summary>${sec.title}</summary>`;
+    for (const it of sec.items) {
+      const k = it.k || 1;
+      let el;
+      if (it.type === 'check') {
+        el = document.createElement('label'); el.className = 'check';
+        el.innerHTML = `<input type="checkbox"> ${it.label}`;
+        const inp = el.querySelector('input');
+        inp.onchange = () => set(it.key, inp.checked);
+        controls[it.key] = () => { inp.checked = !!state.p[it.key]; };
+      } else if (it.type === 'select' || it.type === 'color') {
+        el = document.createElement('div'); el.className = 'row wide';
+        el.innerHTML = `<label>${it.label}</label>` + (it.type === 'select' ? `<select>${it.options.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>` : '<input type="color">');
+        const inp = el.querySelector(it.type === 'select' ? 'select' : 'input');
+        inp.oninput = () => set(it.key, it.num ? Number(inp.value) : inp.value);
+        controls[it.key] = () => { inp.value = state.p[it.key]; };
+      } else {
+        el = document.createElement('div'); el.className = 'row';
+        el.innerHTML = `<label>${it.label}<i title="Вернуть по умолчанию">↺</i></label><input type="range" min="${it.min * k}" max="${it.max * k}" step="${it.step * k}"><input type="number" step="any">`;
+        const [rg, nb] = el.querySelectorAll('input');
+        const round = (v) => +(+v).toFixed(6);
+        rg.oninput = () => set(it.key, round(rg.value / k));
+        nb.onchange = () => set(it.key, round(nb.value / k));
+        el.querySelector('i').onclick = () => set(it.key, DEFAULTS[it.key]);
+        controls[it.key] = () => { const v = round(state.p[it.key] * k); rg.value = v; nb.value = v; };
+      }
+      d.appendChild(el);
+    }
+    root.appendChild(d);
+  }
+}
+function syncControls() { for (const f of Object.values(controls)) f(); updateInfo(); }
+function set(key, val) {
+  state.p[key] = val; dirty = true;
+  controls[key]?.();
+  try { localStorage.setItem('vinyl-spin:params', JSON.stringify(state.p)); } catch (e) { }
+  updateInfo(); if (!clock.playing) redraw();
+}
+function updateInfo() {
+  const p = state.p, T = durationOf();
+  const gb = p.bitrate * 1e6 * T / 8 / 1e9, perMin = p.bitrate * 60 / 8;
+  $('sizeNote').textContent = `Видео ${p.bitrate} Мбит/с ≈ ${perMin.toFixed(0)} МБ на минуту, ≈ ${gb.toFixed(2)} ГБ на ${fmt(T)} (плюс звук: WAV 24/48 стерео ≈ 17 МБ/мин).`;
+  const q = (s) => /[\s"'$`\\]/.test(s) ? `"${s.replace(/(["$`\\])/g, '\\$1')}"` : s;
+  const lines = ['node render.mjs --preset preset.json'];
+  for (const k of ['bg', 'disk', 'logo', 'audio']) if (state.names[k]) lines.push(`  --${k} ${q(state.names[k])}`);
+  lines.push('  --out ролик.mov');
+  $('cmd').value = lines.join(' \\\n') + '\n\n# быстрый просмотр: первые 20 с и последние 20 с\n# node render.mjs --preset preset.json --limit 20\n# node render.mjs --preset preset.json --from -20 --limit 20';
+}
+
+async function setFile(kind, file) {
+  const drop = document.querySelector(`.drop[data-kind="${kind}"]`);
+  if (!file) {
+    if (kind === 'audio') { audio.pause(); audio.removeAttribute('src'); if (audioUrl) URL.revokeObjectURL(audioUrl); state.audioDur = 0; }
+    else { state.src[kind] = null; if (kind === 'logo') state.logoCleared = true; }
+    state.names[kind] = ''; drop.classList.remove('has'); drop.style.backgroundImage = '';
+    drop.querySelector('small').textContent = kind === 'audio' ? 'WAV / AIFF / FLAC / MP3' : 'перетащи картинку';
+    dirty = true; setT(Math.min(clock.t, durationOf())); updateInfo(); return;
+  }
+  if (kind === 'audio') {
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(file); audio.src = audioUrl;
+    await new Promise((res, rej) => { audio.onloadedmetadata = res; audio.onerror = () => rej(new Error('браузер не открыл этот аудиофайл (для превью); render.mjs всё равно его возьмёт')); });
+    state.audioDur = audio.duration;
+    drop.querySelector('small').textContent = `${file.name} · ${fmt(audio.duration)}`;
+  } else {
+    state.src[kind] = await loadImageBlob(file);
+    if (kind === 'logo') state.logoCleared = false;
+    drop.querySelector('small').textContent = `${file.name} · ${state.src[kind].width}×${state.src[kind].height}`;
+    const u = URL.createObjectURL(file); drop.style.backgroundImage = `linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.55)), url("${u}")`;
+  }
+  state.names[kind] = file.name; drop.classList.add('has');
+  dirty = true; updateInfo(); setT(clock.t);
+}
+
+function savePreset() {
+  const data = { app: 'vinyl-spin', version: 1, params: { ...state.p }, files: { ...state.names } };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  download(blob, 'preset.json');
+}
+function applyPreset(data) {
+  const params = data.params || data;
+  for (const k of Object.keys(DEFAULTS)) if (k in params) state.p[k] = params[k];
+  dirty = true; syncControls(); setT(clock.t);
+}
+function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+function baseName() { return (state.names.disk || state.names.bg || 'vinyl-spin').replace(/\.[^.]+$/, ''); }
+
+function initUI() {
+  buildControls();
+  try { const saved = JSON.parse(localStorage.getItem('vinyl-spin:params') || 'null'); if (saved) applyPreset(saved); } catch (e) { }
+  syncControls();
+  $('stGpu').textContent = 'GPU: ' + R.gpu;
+  document.querySelectorAll('.drop').forEach(drop => {
+    const kind = drop.dataset.kind, inp = drop.querySelector('input');
+    const go = (f) => setFile(kind, f).catch(e => alert(e.message));
+    inp.onchange = () => inp.files[0] && go(inp.files[0]);
+    drop.querySelector('.x').onclick = (e) => { e.preventDefault(); e.stopPropagation(); inp.value = ''; go(null); };
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+    drop.ondragleave = () => drop.classList.remove('over');
+    drop.ondrop = (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); document.body.classList.remove('dragging'); const f = e.dataTransfer.files[0]; if (f) go(f); };
+  });
+  let dragDepth = 0;
+  window.addEventListener('dragenter', () => { dragDepth++; document.body.classList.add('dragging'); });
+  window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => { // брошено мимо полей: угадываем по типу
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+    const f = e.dataTransfer.files[0]; if (!f) return;
+    if (/json$/i.test(f.name)) f.text().then(t => applyPreset(JSON.parse(t)));
+    else if (f.type.startsWith('audio') || /\.(wav|aiff?|flac|mp3|m4a)$/i.test(f.name)) setFile('audio', f);
+    else if (f.type.startsWith('image')) setFile(!state.src.bg ? 'bg' : !state.src.disk ? 'disk' : 'logo', f);
+  });
+
+  $('bPlay').onclick = () => play(!clock.playing);
+  $('bStart').onclick = () => setT(0);
+  $('bEnd').onclick = () => setT(durationOf() - 5);
+  $('bBack').onclick = () => setT(currentT() - 10);
+  $('bFwd').onclick = () => setT(currentT() + 10);
+  $('bPrevF').onclick = () => { play(false); setT((frameIndex(state.p, clock.t) - 1) / state.p.fps); };
+  $('bNextF').onclick = () => { play(false); setT((frameIndex(state.p, clock.t) + 1) / state.p.fps); };
+  $('seekbar').oninput = (e) => setT(+e.target.value);
+  audio.onended = () => play(false);
+  window.addEventListener('keydown', (e) => {
+    if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName) && e.target.type !== 'range') return;
+    if (e.code === 'Space') { e.preventDefault(); play(!clock.playing); }
+    else if (e.code === 'ArrowLeft') { e.preventDefault(); e.shiftKey ? $('bBack').click() : $('bPrevF').click(); }
+    else if (e.code === 'ArrowRight') { e.preventDefault(); e.shiftKey ? $('bFwd').click() : $('bNextF').click(); }
+    else if (e.code === 'Home') setT(0);
+    else if (e.code === 'End') setT(durationOf() - 5);
+  });
+
+  $('bPng').onclick = () => { seek(currentT()); cv.toBlob(b => download(b, `${baseName()}-${frameIndex(state.p, currentT())}.png`), 'image/png'); };
+  $('bThumb').onclick = () => { seek(currentT()); const c = resample(cv, 0, 0, cv.width, cv.height, 1280, 720); c.toBlob(b => download(b, `${baseName()}-1280x720.png`), 'image/png'); };
+  $('bSave').onclick = savePreset;
+  $('presetIn').onchange = (e) => { const f = e.target.files[0]; if (f) f.text().then(t => applyPreset(JSON.parse(t))).catch(err => alert('Не читается пресет: ' + err.message)); e.target.value = ''; };
+  $('bReset').onclick = () => { if (confirm('Вернуть все параметры по умолчанию?')) applyPreset(DEFAULTS); };
+  $('bCaps').onclick = async () => {
+    const { W, H } = parseRes(state.p.res);
+    const r = await VS.h264Support(W, H, state.p.fps, state.p.bitrate * 1e6);
+    const note = $('capsNote');
+    note.className = 'note ' + (r.supported ? 'ok' : 'warn');
+    note.textContent = r.supported ? `H.264 есть: ${r.codec}, ${r.hardwareAcceleration === 'prefer-hardware' ? 'аппаратно' : 'без гарантии аппаратного'}. render.mjs пойдёт быстрым путём.` : `${r.reason}. render.mjs возьмёт запасной путь (кадры в ffmpeg).`;
+  };
+  setT(0);
+}
+
+if (RENDER_MODE) {
+  document.body.classList.add('render');
+} else {
+  initUI();
+}
+</script>
+</body>
+</html>
