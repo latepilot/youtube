@@ -656,10 +656,10 @@ vec2 tunnel(vec2 p, vec4 sd, float px){
   float line = 1.0 - smoothstep(width - aa, width + aa, dist);
   // штрихи по кругу: у каждого кольца свой рисунок и медленное вращение
   float pick = h3(uvec3(ri, 11u, uSeed + uint(sd.w)));
-  float dashN = pick < 0.45 ? 0.0 : pick < 0.65 ? 96.0 : pick < 0.8 ? 7.0 : pick < 0.9 ? 3.0 : 24.0;
+  float dashN = pick < 0.45 ? 0.0 : pick < 0.65 ? 48.0 : pick < 0.8 ? 7.0 : pick < 0.9 ? 3.0 : 24.0;
   if (dashN > 0.0) {
     float spin = (h3(uvec3(ri, 13u, uSeed)) - 0.5) * uRot * 0.6;
-    float u = th / TAU * dashN + spin, duty = mix(0.3, 0.75, h3(uvec3(ri, 17u, uSeed)));
+    float u = th / TAU * dashN + spin, duty = mix(dashN > 40.0 ? 0.55 : 0.3, 0.8, h3(uvec3(ri, 17u, uSeed)));
     float aaT = dashN / TAU * px / rho;
     float g = fract(u);
     float dash = (1.0 - smoothstep(duty - aaT, duty + aaT, g)) * smoothstep(-aaT, aaT, g);
@@ -759,8 +759,28 @@ vec2 frameAt(vec2 p, float px){
   // точка чёрного: в тенях бумага чистая, без сетки мелких точек
   return clamp((a - 0.035) / 0.965, 0.0, 1.0);
 }
+// проход 1: значение сцены в каждом пикселе (x — основной цвет, y — второй) в текстуру
+void main(){
+  float H = uRes.y;
+  float pxs = uHalftone == 1 ? max(1.0, uCell * 0.5) / H : 1.0 / H;  // предфильтр в полъячейки растра — без муара
+  o = vec4(frameAt((gl_FragCoord.xy - 0.5 * uRes) / H, pxs), 0.0, 1.0);
+}`;
+
+// проход 2: печать — растр, второй цвет со сдвигом (берётся из той же текстуры), подписи, логотип, зерно
+const FS_PRINT = `#version 300 es
+precision highp float; precision highp int;
+uniform vec2 uRes; uniform sampler2D uScene;
+uniform int uHalftone; uniform float uCell, uAngle, uMisreg, uInk2Amt;
+uniform vec3 uPaper, uInk, uInk2;
+uniform float uGrain; uniform uint uFrame, uSeed;
+uniform sampler2D uOverlay; uniform int uHasOverlay;
+uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
+out vec4 o;
+const float TAU = 6.2831853;
+uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; return v; }
+float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
 // растр: «круглая точка» (Euclidean spot) — 0 в центре ячейки, 1 в углах. Краска там, где spot < тон.
-// Сцена считается в каждом пикселе, поэтому края предметов чёткие, а точки видны только в полутонах.
+// Сцена посчитана в каждом пикселе, поэтому края предметов чёткие, а точки видны только в полутонах.
 float halftone(vec2 frag, float tone, float ang, float cs){
   float c = cos(ang), s = sin(ang);
   vec2 q = mat2(c, s, -s, c) * frag / cs * TAU;
@@ -769,19 +789,17 @@ float halftone(vec2 frag, float tone, float ang, float cs){
   return smoothstep(-w, w, d);
 }
 void main(){
-  vec2 frag = vec2(gl_FragCoord.x, gl_FragCoord.y);
+  vec2 frag = gl_FragCoord.xy;
   float H = uRes.y;
-  vec2 c0 = 0.5 * uRes;
-  float pxs = uHalftone == 1 ? max(1.0, uCell * 0.5) / H : 1.0 / H;
-  vec2 v = frameAt((frag - c0) / H, pxs);
+  vec2 v = texelFetch(uScene, ivec2(frag), 0).xy;
   vec3 col;
   if (uHalftone == 1) {
     float a1 = radians(uAngle), a2 = radians(uAngle + 30.0);
     col = mix(uPaper, uInk, halftone(frag, uInk2Amt > 0.0 ? v.x : min(1.0, v.x + v.y), a1, uCell));
     if (uInk2Amt > 0.0) {
       // второй цвет печатается со сдвигом (несовмещение красок), своим углом растра
-      vec2 v2 = uMisreg > 0.0 ? frameAt((frag + vec2(uMisreg, -uMisreg * 0.6) - c0) / H, pxs) : v;
-      col = mix(col, uInk2, halftone(frag, v2.y, a2, uCell) * uInk2Amt);
+      float v2 = texture(uScene, (frag + vec2(uMisreg, -uMisreg * 0.6)) / uRes).y;
+      col = mix(col, uInk2, halftone(frag, v2, a2, uCell) * uInk2Amt);
     }
   } else {
     col = mix(uPaper, uInk, uInk2Amt > 0.0 ? v.x : min(1.0, v.x + v.y));
@@ -827,6 +845,7 @@ class Renderer {
     if (!gl) throw new Error('WebGL2 недоступен');
     this.gl = gl;
     this.main = this.program(FS_MAIN);
+    this.print = this.program(FS_PRINT);
     this.pack = this.program(FS_PACK);
     this.vao = gl.createVertexArray();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
@@ -858,26 +877,38 @@ class Renderer {
     const gl = this.gl;
     if (this.W === W && this.H === H) return;
     this.W = W; this.H = H; this.canvas.width = W; this.canvas.height = H;
-    for (const k of ['fbTex', 'packTex']) if (this[k]) gl.deleteTexture(this[k]);
-    for (const k of ['fb', 'packFb']) if (this[k]) gl.deleteFramebuffer(this[k]);
-    const mkTarget = (w, h) => {
+    for (const k of ['fbTex', 'packTex', 'sceneTex']) if (this[k]) gl.deleteTexture(this[k]);
+    for (const k of ['fb', 'packFb', 'sceneFb']) if (this[k]) gl.deleteFramebuffer(this[k]);
+    const mkTarget = (w, h, filter = gl.NEAREST) => {
       const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
       gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
       return [t, f];
     };
     [this.fbTex, this.fb] = mkTarget(W, H);
+    [this.sceneTex, this.sceneFb] = mkTarget(W, H, gl.LINEAR);
     [this.packTex, this.packFb] = mkTarget(W / 4, H * 3 / 2);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   draw(s) {
-    const gl = this.gl, { p, u } = this.main;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb); gl.viewport(0, 0, this.W, this.H);
+    const gl = this.gl;
+    this.pass(this.main, this.sceneFb, s);   // 1) сцена
+    this.pass(this.print, this.fb, s);       // 2) печать
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  // униформы ставим все, какие есть в программе (отсутствующие — без ошибок)
+  pass(prog, target, s) {
+    const gl = this.gl, { p, u } = prog;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target); gl.viewport(0, 0, this.W, this.H);
     gl.useProgram(p); gl.bindVertexArray(this.vao);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.overlayTex); gl.uniform1i(u.uOverlay, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.logoTex); gl.uniform1i(u.uLogo, 1);
+    if (prog === this.print) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.sceneTex); gl.uniform1i(u.uScene, 2); }
     gl.uniform2f(u.uRes, this.W, this.H);
     gl.uniform1i(u.uSceneA, s.sceneA); gl.uniform1i(u.uSceneB, s.sceneB); gl.uniform1f(u.uMix, s.mix);
     gl.uniform4fv(u.uSeedA, s.seedA); gl.uniform4fv(u.uSeedB, s.seedB);
@@ -893,9 +924,6 @@ class Renderer {
     gl.uniform1i(u.uHasOverlay, s.hasOverlay);
     gl.uniform4f(u.uLogoRect, ...s.logoRect); gl.uniform1i(u.uHasLogo, s.hasLogo); gl.uniform1f(u.uLogoOpacity, s.logoOpacity);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   readRGBA() {
     const gl = this.gl, out = new Uint8Array(this.W * this.H * 4);
