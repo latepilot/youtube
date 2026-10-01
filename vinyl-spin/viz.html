@@ -139,61 +139,40 @@
 /* ==========================================================================
    Параметры. Размеры в долях высоты кадра H (не зависят от разрешения).
    ========================================================================== */
-const PALETTES = {
-  coal:  { paper: '#121315', ink: '#e9e5da', ink2: '#5aa0c8' },  // уголь: светлая краска на тёмной бумаге
-  paper: { paper: '#e9e5dc', ink: '#17181a', ink2: '#2f5f9e' },  // бумага: тёмная краска на светлой
-  dub:   { paper: '#07121a', ink: '#a8c7d6', ink2: '#e9e5da' },  // даб-синий
-  riso:  { paper: '#ece6da', ink: '#1d3f8c', ink2: '#e2574c' },  // ризограф: синий + красный
-};
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  scenes: 'auto', seed: 1, speed: 1,
-  palette: 'coal', paper: '#121315', ink: '#e9e5da', ink2: '#5aa0c8', ink2Amt: 0.9,
-  halftone: true, cell: 7, angle: 45, misreg: 1.2, grain: 0.04,
-  kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1, fog: 1,
+  scenes: 'auto', seed: 1,
+  blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
+  blk: 13, grain: 0.05,
+  kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1,
   syncMs: 0, bpmFix: 0, gridShiftMs: 0,
-  overlay: true, marks: true, artist: 'PROSTYE TONA', title: '',
-  logoMode: 'default', logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
+  logoMode: 'none', logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
   bitrate: 25, gopSec: 0.5,
 });
+const SCENE_NAMES = ['три прибора (тёмная)', 'лист с волной (светлая)', 'кольца и волна (тёмная)', 'поле (светлая)'];
 const SCHEMA = [
   { title: 'Кадр', open: false, items: [
     { key: 'res', label: 'Разрешение', type: 'select', options: [['1920x1080', '1920×1080 (1080p)'], ['2560x1440', '2560×1440 (1440p)'], ['3840x2160', '3840×2160 (4K)'], ['1280x720', '1280×720']] },
     { key: 'fps', label: 'Кадров в секунду', type: 'select', num: true, options: [[24, '24'], [25, '25'], [30, '30'], [50, '50'], [60, '60']] },
   ]},
   { title: 'Тема: даб-техно', open: true, items: [
-    { key: 'scenes', label: 'Сцены', type: 'select', options: [['auto', 'по секциям: грув — туннель, брейк — море'], ['tunnel', 'только туннель колец'], ['sea', 'только точечное море']] },
+    { key: 'scenes', label: 'Сцены', type: 'select', options: [['auto', 'по секциям: грув — тёмные, брейк — светлые'], ...SCENE_NAMES.map((n, i) => [String(i), 'только «' + n + '»'])] },
     { key: 'seed', label: 'Вариант (seed)', min: 1, max: 999, step: 1 },
-    { key: 'speed', label: 'Скорость камеры', min: 0, max: 3, step: 0.01 },
-    { key: 'fog', label: 'Туман', min: 0, max: 3, step: 0.01 },
+    { key: 'blue', label: 'Синий', type: 'color' },
+    { key: 'red', label: 'Красный', type: 'color' },
+    { key: 'gold', label: 'Золотой (линии в «кольцах»)', type: 'color' },
+    { key: 'blk', label: 'Размер «пикселя» пятен, px при 1080p', min: 4, max: 40, step: 0.5 },
+    { key: 'grain', label: 'Зерно', min: 0, max: 0.2, step: 0.001 },
   ]},
   { title: 'Реакция на трек', open: true, items: [
-    { key: 'kickAmt', label: 'Кик: волна и толчок', min: 0, max: 2, step: 0.01 },
-    { key: 'stabAmt', label: 'Аккорды и эхо: дуги, круги', min: 0, max: 2, step: 0.01 },
-    { key: 'hatAmt', label: 'Хэты: искры', min: 0, max: 2, step: 0.01 },
+    { key: 'kickAmt', label: 'Кик: пятна, кольца, прогиб линий', min: 0, max: 2, step: 0.01 },
+    { key: 'stabAmt', label: 'Аккорды и эхо: красное, контуры', min: 0, max: 2, step: 0.01 },
+    { key: 'hatAmt', label: 'Хэты: вспышки, точки, квадраты', min: 0, max: 2, step: 0.01 },
     { key: 'flashAmt', label: 'Дроп: вспышка', min: 0, max: 2, step: 0.01 },
     { key: 'syncMs', label: 'Сдвиг картинки, мс (минус — раньше звука)', min: -200, max: 200, step: 1 },
   ]},
-  { title: 'Печать', open: true, items: [
-    { key: 'palette', label: 'Палитра', type: 'select', options: [['coal', 'уголь'], ['paper', 'бумага'], ['dub', 'даб-синий'], ['riso', 'ризограф'], ['custom', 'свои цвета']] },
-    { key: 'paper', label: 'Бумага', type: 'color' },
-    { key: 'ink', label: 'Краска', type: 'color' },
-    { key: 'ink2', label: 'Второй цвет (события)', type: 'color' },
-    { key: 'ink2Amt', label: 'Второй цвет, сила', min: 0, max: 1, step: 0.01 },
-    { key: 'halftone', label: 'Полутоновый растр', type: 'check' },
-    { key: 'cell', label: 'Растр: шаг, px при 1080p', min: 3, max: 24, step: 0.1 },
-    { key: 'angle', label: 'Растр: угол, °', min: 0, max: 90, step: 0.5 },
-    { key: 'misreg', label: 'Сдвиг второго цвета, px', min: 0, max: 8, step: 0.1 },
-    { key: 'grain', label: 'Зерно', min: 0, max: 0.2, step: 0.001 },
-  ]},
-  { title: 'Подписи', open: false, items: [
-    { key: 'overlay', label: 'Подписи и данные трека', type: 'check' },
-    { key: 'marks', label: 'Пометки «от руки» на дропах', type: 'check' },
-    { key: 'artist', label: 'Исполнитель', type: 'text' },
-    { key: 'title', label: 'Название (пусто — имя файла)', type: 'text' },
-  ]},
   { title: 'Логотип', open: false, items: [
-    { key: 'logoMode', label: 'Какой логотип', type: 'select', options: [['default', 'стандартный (KËNIG FLOW)'], ['file', 'свой файл'], ['none', 'без логотипа']] },
+    { key: 'logoMode', label: 'Какой логотип', type: 'select', options: [['none', 'без логотипа'], ['default', 'стандартный (KËNIG FLOW)'], ['file', 'свой файл']] },
     { key: 'logoSize', label: 'Высота, % высоты кадра', min: 0.02, max: 0.4, step: 0.001, k: 100 },
     { key: 'logoRight', label: 'Отступ справа, % высоты', min: 0, max: 0.3, step: 0.001, k: 100 },
     { key: 'logoBottom', label: 'Отступ снизу, % высоты', min: 0, max: 0.3, step: 0.001, k: 100 },
@@ -561,15 +540,6 @@ function prepareMap(raw, p) {
     if (gap > 1.3 * m.beatLen || m.stabs.s[i] > prevS * 1.15 + 0.05) { c = i; }
     m.stabChain[i] = c; m.stabEcho[i] = i - c;
   }
-  // путь камеры: интеграл скорости по времени (100 Гц) — чистая функция карты и параметров
-  const n = Math.ceil(m.duration * AN.MAP) + 2, cam = new Float64Array(n);
-  for (let i = 1; i < n; i++) {
-    const t = (i - 1) / AN.MAP, sec = m.sections[sectionIndex(m, t)];
-    const lvl = m.fullSlow[Math.min(m.fullSlow.length - 1, i - 1)] || 0;
-    let v = (sec.kick ? 1.6 : 0.55) * (0.7 + 0.6 * lvl) * (1 + 0.9 * tensionAt(m, t) + 1.2 * dropAt(m, t, 1.2));
-    cam[i] = cam[i - 1] + v * p.speed / AN.MAP;
-  }
-  m.cam = cam;
   return m;
 }
 const upper = (arr, t) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= t) lo = mid + 1; else hi = mid; } return lo; };
@@ -602,7 +572,6 @@ function springSum(ev, t, freq, zeta, win) {
   for (const i of recentEvents(ev, t, win, 16)) { const a = t - ev.t[i]; s += ev.s[i] * Math.exp(-zeta * w * a) * Math.sin(wd * a); }
   return s;
 }
-function camAt(m, t) { return sample(m.cam, Math.max(0, t)); }
 function hash01(a, b = 0) { let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35); h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15; return (h >>> 0) / 4294967296; }
 
 /* ==========================================================================
@@ -615,205 +584,315 @@ const FS_MAIN = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes;
 uniform int uSceneA, uSceneB; uniform float uMix; uniform vec4 uSeedA, uSeedB;
-uniform float uCam;                 // путь камеры (по модулю периода)
-uniform vec2 uVP;                   // точка схода туннеля
-uniform vec3 uSwell; uniform float uSeaZ; // море: фазы волн и сдвиг (считаются в JS)
-uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uBreak, uTension, uFlash, uFog, uRot, uRoll, uBeat;
-uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, путь камеры в момент удара, seed
-uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, угол, путь камеры в момент удара
-uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, seed, -
+uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uStab, uTension, uFlash, uDropAge, uBeat, uTime, uBlk;
 uniform float uKickAmt, uStabAmt, uHatAmt;
-uniform int uHalftone; uniform float uCell, uAngle, uMisreg, uInk2Amt;
-uniform vec3 uPaper, uInk, uInk2;
-uniform float uGrain; uniform uint uFrame, uSeed;
-uniform sampler2D uOverlay; uniform int uHasOverlay;
-uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
+uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed, -
+uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, номер эха, seed
+uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, номер, -
+uniform sampler2D uWave;                       // 256 колонок вокруг «сейчас»: r — вся громкость, g — низ, b — середина, a — верх
+uniform vec3 uBlue, uRed, uGold;
+uniform uint uSeed;
 out vec4 o;
 
-const float PI = 3.14159265, TAU = 6.2831853, PERIOD = 3072.0;
+const float PI = 3.14159265, TAU = 6.2831853;
+float PX, LW;   // пиксель и полутолщина линии в долях высоты кадра
 uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; return v; }
 float h3(uvec3 v){ return float(pcg3d(v).x) * (1.0 / 4294967295.0); }
-float h1(float a, float b){ return h3(uvec3(uint(int(floor(a)) + 1048576), uint(int(floor(b)) + 1048576), uSeed)); }
-float wrap(float d){ return mod(d + PERIOD * 0.5, PERIOD) - PERIOD * 0.5; }
-float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
+float hc(vec2 c, uint k){ return h3(uvec3(uvec2(ivec2(floor(c)) + 32768), k + uSeed * 7919u)); }
 
-// ---------- сцена 0: туннель колец (грув) ----------
-// p — точка экрана в долях H (центр 0,0, y вверх); px — размер «пикселя» выборки в долях H
-vec2 tunnel(vec2 p, vec4 sd, float px){
-  vec2 d = p - uVP;
-  float rho = max(length(d), 1e-4), th = atan(d.y, d.x) + uRoll;
-  float f = 0.42 * (1.0 + 0.035 * uSpring * uKickAmt);
-  float z = f / rho;                                   // глубина стены туннеля
-  float zw = z + uCam;
-  float sp = sd.x;                                     // шаг колец
-  float rr = zw / sp, idx = floor(rr), fr = rr - idx;
-  float ringPx = sp / (f / (rho * rho) * px);          // шаг колец на экране, в «пикселях» выборки
-  uint ri = uint(int(mod(idx, PERIOD / sp)));
-  float hr = h3(uvec3(ri, 7u, uSeed + uint(sd.w)));
-  float width = mix(0.035, 0.11, hr * hr);
-  float aa = 1.0 / max(ringPx, 1e-3);
-  float dist = min(fr, 1.0 - fr);
-  float line = 1.0 - smoothstep(width - aa, width + aa, dist);
-  // штрихи по кругу: у каждого кольца свой рисунок и медленное вращение
-  float pick = h3(uvec3(ri, 11u, uSeed + uint(sd.w)));
-  float dashN = pick < 0.45 ? 0.0 : pick < 0.65 ? 48.0 : pick < 0.8 ? 7.0 : pick < 0.9 ? 3.0 : 24.0;
-  if (dashN > 0.0) {
-    float spin = (h3(uvec3(ri, 13u, uSeed)) - 0.5) * uRot * 0.6;
-    float u = th / TAU * dashN + spin, duty = mix(dashN > 40.0 ? 0.55 : 0.3, 0.8, h3(uvec3(ri, 17u, uSeed)));
-    float aaT = dashN / TAU * px / rho;
-    float g = fract(u);
-    float dash = (1.0 - smoothstep(duty - aaT, duty + aaT, g)) * smoothstep(-aaT, aaT, g);
-    line *= mix(dash, duty, clamp(aaT * 2.0, 0.0, 1.0));
+// ---------- примитивы (сглаженные, в долях H) ----------
+float seg(vec2 p, vec2 a, vec2 b, float w){ vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return 1.0 - smoothstep(w - PX * 0.6, w + PX * 0.6, length(pa - ba * h)); }
+float ring(vec2 p, vec2 c, float r, float w){ return 1.0 - smoothstep(w - PX * 0.6, w + PX * 0.6, abs(length(p - c) - r)); }
+float disc(vec2 p, vec2 c, float r){ return 1.0 - smoothstep(r - PX, r + PX, length(p - c)); }
+float box(vec2 p, vec2 c, vec2 hs){ vec2 d = abs(p - c) - hs; return 1.0 - smoothstep(-PX * 0.7, PX * 0.7, max(d.x, d.y)); }
+float frameBox(vec2 p, vec2 c, vec2 hs, float w){ vec2 d = abs(p - c) - hs; float s = max(d.x, d.y); return 1.0 - smoothstep(w - PX * 0.6, w + PX * 0.6, abs(s)); }
+float gau(vec2 p, vec2 c, vec2 s){ vec2 d = (p - c) / s; return exp(-0.5 * dot(d, d)); }
+vec2 mosaic(vec2 p){ return (floor(p / uBlk) + 0.5) * uBlk; }
+vec4 wave(float u){ return texture(uWave, vec2(clamp(u, 0.0, 1.0), 0.5)); }
+// пиксельное пятно: шаг цвета по блокам, край — ступеньками
+float blockMask(float v, vec2 q, uint k){ return smoothstep(0.06, 0.16, v + (hc(q / uBlk, k) - 0.5) * 0.08); }
+vec3 cool(float v){ return mix(uBlue, vec3(1.0), smoothstep(0.62, 1.0, v)); }          // синий → белый
+vec3 hot(float v){ return mix(uRed, vec3(1.0, 0.72, 0.45), smoothstep(0.7, 1.05, v)); }  // красный → светлый
+float kickE(){ return min(1.2, uKick) * uKickAmt; }
+float pulse(){ return 1.0 + 0.35 * uTension * (1.0 - uBeat); }   // перед дропом всё дышит в такт долям
+
+// сетка точек; хэты зажигают случайные точки синим/красным
+vec3 dotGrid(vec3 col, vec2 p, float step, float r, vec3 dotC, float area){
+  vec2 g = p / step, gi = floor(g + 0.5);
+  float d = length((g - gi) * step);
+  float m = (1.0 - smoothstep(r - PX * 0.5, r + PX * 0.7, d)) * area;
+  float spark = 0.0; vec3 sc = uBlue;
+  for (int i = 0; i < 4; i++) { if (i >= uHatN) break; vec4 h = uHats[i];
+    float pick = hc(gi, uint(h.z) * 13u + 5u);
+    float e = h.y * exp(-h.x / 0.12) * uHatAmt;
+    if (pick < 0.07 * e) { spark = max(spark, e); sc = pick < 0.035 * e ? uRed : uBlue; }
   }
-  line = mix(line, width * 1.6, 1.0 - smoothstep(1.0, 2.5, ringPx));   // слишком густо — среднее
-  float fogK = 0.17 * uFog * (1.0 + 1.6 * uBreak);
-  float fog = exp(-z * fogK) * smoothstep(0.02, 0.18, z);
-  float base = (0.5 + 0.5 * uLowSlow) * (1.0 + 0.8 * uTension) * (1.0 + 0.45 * min(uKick, 1.0) * uKickAmt); // кольца вспыхивают на кик
-  float L = line * fog * base * (0.75 + 0.25 * hr);
-  float acc = 0.0;
-  // волна кика уходит вглубь
-  for (int i = 0; i < 6; i++) { if (i >= uKickN) break; vec4 k = uKicks[i];
-    float front = k.z + 0.6 + k.x * 7.0;
-    float dz = wrap(zw - front) / 0.9;
-    float g = exp(-dz * dz) * k.y * exp(-k.x / 0.45) * uKickAmt;
-    L += g * (0.18 + line * 1.1) * fog;
+  col = mix(col, dotC, m * 0.8);
+  return mix(col, sc, (1.0 - smoothstep(r * 1.6 - PX * 0.5, r * 1.6 + PX, d)) * min(1.0, spark) * area);
+}
+
+// ---------- 0. «Три прибора» (тёмная): крест с пятном и планкой, диск с лепестками и контурами, вспышка-крест ----------
+vec3 sceneTrio(vec2 p, vec4 sd){
+  vec3 col = vec3(0.065, 0.066, 0.054);
+  vec3 lineC = vec3(0.92, 0.91, 0.88);
+  float k = kickE(), pl = pulse();
+  col = dotGrid(col, p, 0.034, 1.25 / 1080.0, vec3(0.62), step(abs(p.y), 0.36) * step(abs(p.x), 0.78) * (0.55 + 0.45 * smoothstep(0.36, 0.2, abs(p.y))));
+  vec2 q = mosaic(p);
+  // слева: низ и кик
+  vec2 cL = vec2(-0.53, 0.0);
+  float vL = gau(q, cL, vec2(0.032 + 0.035 * k, 0.07 + 0.05 * k) * pl) * (0.3 + 0.55 * uLow + 0.55 * k);
+  vL += gau(q, cL, vec2(0.16, 0.007)) * (0.25 + 0.5 * k) * hc(q / uBlk, 3u);
+  col = mix(col, cool(vL), blockMask(vL, q, 1u) * 0.95);
+  col = mix(col, lineC, seg(p, vec2(-0.47, -0.25), vec2(-0.47, 0.25), LW));
+  col = mix(col, lineC, seg(p, vec2(-0.74, 0.0), vec2(-0.33, 0.0), LW));
+  col = mix(col, vec3(1.0), box(p, cL + vec2(0.02, 0.0), vec2(0.035 + 0.045 * uLowSlow + 0.03 * k, 0.022)));
+  // центр: аккорды и середина
+  vec2 d = p, dq = q;
+  float vB = (gau(dq, vec2(-0.095, 0.0), vec2(0.045, 0.03)) + gau(dq, vec2(0.1, 0.005), vec2(0.05, 0.034))) * (0.35 + 0.5 * uLow + 0.3 * k) * pl;
+  col = mix(col, cool(vB), blockMask(vB, dq, 2u));
+  float st = min(1.2, uStab) * uStabAmt;
+  float vR = (gau(dq, vec2(-0.06, 0.0), vec2(0.03, 0.024)) + gau(dq, vec2(0.065, 0.0), vec2(0.028, 0.03))) * (0.15 + 0.95 * st);
+  col = mix(col, hot(vR), blockMask(vR, dq, 4u) * smoothstep(0.1, 0.3, vR));
+  float rho = length(d), th = atan(d.y, d.x);
+  float wob = 0.012 * sin(th * 3.0 + uTime * 0.4 + sd.y * 6.0) * (0.4 + uMid);
+  // скруглённый ромб: выступы вверх-вниз-влево-вправо, между ними прогиб; середина трека его раскачивает
+  float rO = 0.27 * (1.0 + 0.05 * cos(2.0 * th) + (0.13 + 0.05 * uMid) * cos(4.0 * th)) + wob;
+  float rI = 0.205 * (1.0 + 0.04 * cos(2.0 * th) + (0.2 + 0.06 * uMid) * cos(4.0 * th)) + wob * 0.7;
+  col = mix(col, lineC, (1.0 - smoothstep(LW - PX * 0.6, LW + PX * 0.6, abs(rho - rO))) * 0.95);
+  col = mix(col, lineC, (1.0 - smoothstep(LW - PX * 0.6, LW + PX * 0.6, abs(rho - rI))) * 0.95);
+  for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];   // эхо аккорда — контур расходится и гаснет
+    float a = s.y * exp(-s.x / 0.9) * uStabAmt * smoothstep(0.0, 0.03, s.x);
+    float re = rI * (1.0 + s.x * 0.55);
+    col = mix(col, lineC, (1.0 - smoothstep(LW * 0.8 - PX * 0.6, LW * 0.8 + PX * 0.6, abs(rho - re))) * a * 0.7);
   }
-  // дуги аккордов: висят в мире на месте удара, камера к ним подлетает; эхо — новые дуги рядом
+  float h = min(1.2, uHat) * uHatAmt;
+  float vT = (gau(q, vec2(0.0, 0.205), vec2(0.012, 0.016)) + gau(q, vec2(0.0, -0.205), vec2(0.012, 0.016))) * (0.35 + 0.9 * h);
+  col = mix(col, cool(vT), blockMask(vT, q, 5u));
+  col = mix(col, vec3(1.0), disc(p, vec2(0.0), 0.054 * (1.0 + 0.07 * uSpring * uKickAmt) * pl));
+  // справа: верх и хэты — пиксельная вспышка-крест
+  vec2 cR = vec2(0.53, 0.0);
+  float hi = uHigh * 0.7 + h;
+  float vS = max(gau(q, cR, vec2(0.13 * (0.6 + 0.5 * hi), 0.012)), gau(q, cR, vec2(0.011, 0.11 * (0.5 + 0.6 * hi)))) * (0.35 + 0.7 * hi);
+  vS += gau(q, cR, vec2(0.05, 0.035)) * (0.3 + 0.5 * hi);
+  vS += gau(q, cR, vec2(0.11, 0.07)) * 0.25 * hc(q / uBlk, 9u) * (0.4 + hi);
+  col = mix(col, cool(vS), blockMask(vS, q, 6u));
+  col += vec3(1.0, 0.97, 0.93) * gau(p, cR, vec2(0.075 * (0.7 + 0.5 * hi), 0.0065)) * (0.5 + 0.6 * hi);   // гладкий белый штрих
+  col = mix(col, lineC, seg(p, vec2(0.53, -0.3), vec2(0.53, 0.3), LW));
+  col = mix(col, lineC, seg(p, vec2(0.33, 0.0), vec2(0.74, 0.0), LW));
+  return col;
+}
+
+// ---------- 1. «Лист» (светлая карточка): кольца от кика, волна трека, малый прибор ----------
+vec3 sceneSheet(vec2 p, vec4 sd){
+  float hw = uRes.x / uRes.y * 0.5;
+  vec3 ink = vec3(0.08, 0.08, 0.07), paper = vec3(0.885, 0.876, 0.862), orange = mix(uRed, vec3(1.0, 0.55, 0.4), 0.35);
+  vec3 col = vec3(0.04, 0.04, 0.035);
+  float card = box(p, vec2(0.0), vec2(hw - 0.097, 0.415));
+  col = mix(col, paper, card);
+  if (card <= 0.0) return col;
+  float k = kickE(), pl = pulse(), st = min(1.2, uStab) * uStabAmt;
+  // сетка: рамка графика, внутренние линии, засечки
+  vec2 b0 = vec2(-0.209, -0.287), b1 = vec2(0.324, 0.283);
+  col = mix(col, ink, frameBox(p, (b0 + b1) * 0.5, (b1 - b0) * 0.5, LW) * 0.9);
+  for (int i = 1; i <= 3; i++) { float x = mix(b0.x, b1.x, float(i) / 4.0); col = mix(col, ink, seg(p, vec2(x, b0.y), vec2(x, b1.y), LW) * 0.85); }
+  col = mix(col, ink, seg(p, vec2(-0.295, 0.135), vec2(b1.x, 0.135), LW) * 0.85);
+  col = mix(col, ink, seg(p, vec2(-0.295, -0.138), vec2(b1.x, -0.138), LW) * 0.85);
+  col = mix(col, ink, seg(p, vec2(-0.295, 0.135), vec2(-0.34, 0.075), LW) * 0.6);
+  col = mix(col, ink, seg(p, vec2(-0.295, -0.138), vec2(-0.34, -0.078), LW) * 0.6);
+  // строки мелких точек внутри графика
+  vec2 g = vec2(p.x / 0.024, p.y / 0.045);
+  float row = (1.0 - smoothstep(0.0, 1.6 * PX / 0.024, abs(fract(g.x + 0.5) - 0.5))) * (1.0 - smoothstep(0.0, 1.6 * PX / 0.045, abs(fract(g.y + 0.5) - 0.5)));
+  col = mix(col, ink, row * 0.5 * step(b0.x, p.x) * step(p.x, b1.x) * step(abs(p.y), 0.27));
+  for (int i = 0; i < 4; i++) { float y = float[4](0.283, 0.135, -0.138, -0.287)[i]; col = mix(col, ink, seg(p, vec2(0.428, y), vec2(0.455, y), LW)); }
+  for (int i = 0; i < 5; i++) { float x = mix(b0.x, b1.x, float(i) / 4.0); col = mix(col, ink, seg(p, vec2(x, b1.y + 0.03), vec2(x, b1.y + 0.042), LW)); }
+  col = mix(col, ink, seg(p, vec2(-hw + 0.155, -0.345), vec2(-hw + 0.205, -0.345), LW));
+  col = mix(col, ink, seg(p, vec2(hw - 0.205, -0.345), vec2(hw - 0.155, -0.345), LW));
+  // ось через весь лист
+  col = mix(col, ink, seg(p, vec2(-hw + 0.16, 0.0), vec2(hw - 0.16, 0.0), LW) * 0.9);
+  // волна трека: тонкие вертикальные штрихи, сердцевина синяя, середина тёмная, край оранжевый
+  float x0 = -0.268, x1 = 0.324;
+  if (p.x > x0 - 0.01 && p.x < x1 + 0.03) {
+    float u = (p.x - x0) / (x1 - x0);
+    float sw = max(2.6 * PX, 0.0026);
+    float ci = floor((p.x - x0) / sw), uc = ((ci + 0.5) * sw) / (x1 - x0);
+    vec4 w = wave(uc);
+    float taper = smoothstep(0.0, 0.18, uc) * smoothstep(1.0, 0.8, uc);
+    float A = (0.02 + 0.24 * w.r * w.r + 0.05 * w.g) * (0.35 + 0.65 * taper) * (0.92 + 0.16 * hc(vec2(ci, 1.0), 21u));
+    float t = abs(p.y) / max(A, 1e-4);
+    float stripe = 1.0 - smoothstep(0.32, 0.5, abs(fract((p.x - x0) / sw) - 0.5) * 2.0 * 0.5 + 0.25);
+    vec3 c = mix(vec3(1.0), uBlue, smoothstep(0.02, 0.18, t));
+    c = mix(c, ink, smoothstep(0.38 + 0.25 * w.g, 0.62 + 0.2 * w.g, t));
+    c = mix(c, orange, smoothstep(0.6 + 0.15 * w.g, 0.8 + 0.1 * w.g, t));
+    float a = (1.0 - smoothstep(0.78, 1.02, t)) * smoothstep(-0.05, 0.02, u) * smoothstep(1.08, 0.98, u);
+    col = mix(col, c, a * mix(0.55, 1.0, stripe) * clamp(0.6 + 0.6 * taper, 0.0, 1.0));
+  }
+  // слева: пятно (синее ядро, оранжевый ореол) и кольца — на каждый кик новое
+  vec2 cL = vec2(-0.458, 0.0);
+  float halo = gau(p, cL + vec2(0.012, 0.0), vec2(0.085, 0.09) * (0.9 + 0.3 * st) * pl) * (0.45 + 0.5 * st);
+  col = mix(col, orange, halo * 0.75);
+  float core = gau(p, cL + vec2(0.01, 0.0), vec2(0.048, 0.052) * (0.85 + 0.35 * uLow + 0.25 * k) * pl);
+  col = mix(col, uBlue, smoothstep(0.15, 0.85, core));
+  for (int i = 0; i < 3; i++) { float r = float[3](0.238, 0.191, 0.142)[i] * (1.0 + 0.015 * uLowSlow);
+    float gap = float[3](0.0, 0.0, 1.0)[i] * smoothstep(0.85, 0.95, abs(cos(atan(p.y, p.x - cL.x) - 0.3)));
+    col = mix(col, uBlue, ring(p, cL, r, LW * 1.3) * (1.0 - gap)); }
+  for (int i = 0; i < 6; i++) { if (i >= uKickN) break; vec4 kk = uKicks[i];
+    float r = 0.06 + kk.x * 0.32, a = kk.y * exp(-kk.x / 0.55) * uKickAmt * smoothstep(0.32, 0.22, r);
+    col = mix(col, uBlue, ring(p, cL, r, LW * 1.1) * a); }
+  col = mix(col, ink, seg(p, vec2(-0.355, -0.1), vec2(-0.355, 0.1), LW));
+  // справа: малый прибор — кольца дрожат от верха, мини-волна
+  vec2 cR = vec2(0.562, 0.0);
+  float hh = min(1.2, uHat) * uHatAmt;
+  for (int i = 0; i < 3; i++) { float r = float[3](0.034, 0.055, 0.088)[i] * (1.0 + 0.08 * hh * float(i + 1) / 3.0);
+    float th = atan(p.y, p.x - cR.x); r *= 1.0 + 0.06 * sin(th * float(3 + i) + uTime * 1.3) * uHigh;
+    col = mix(col, uBlue, ring(p, cR, r, LW * 1.1)); }
+  float mw = (gau(p, cR + vec2(0.005, 0.0), vec2(0.05, 0.012 + 0.012 * uHigh + 0.012 * hh)));
+  col = mix(col, orange, smoothstep(0.2, 0.6, mw) * 0.8);
+  col = mix(col, uBlue, smoothstep(0.55, 0.9, mw) * 0.9);
+  col = mix(col, ink, seg(p, cR - vec2(0.0, 0.12), cR + vec2(0.0, 0.12), LW));
+  col = mix(col, ink, seg(p, vec2(0.442, -0.06), vec2(0.442, 0.06), LW));
+  return col;
+}
+
+// ---------- 2. «Кольца» (оливково-чёрная): дуги, пятна, пиксельная волна, линия «сейчас», легенда ----------
+vec3 sceneRings(vec2 p, vec4 sd){
+  vec3 col = vec3(0.07, 0.064, 0.036);
+  vec3 lineC = vec3(0.95, 0.94, 0.9);
+  float k = kickE(), pl = pulse(), st = min(1.2, uStab) * uStabAmt, hh = min(1.2, uHat) * uHatAmt;
+  // засечки сеткой
+  vec2 gs = vec2(0.14, 0.152), gi = floor(p / gs + 0.5), gf = p - gi * gs;
+  float tick = max(seg(gf, vec2(0.0, -0.006), vec2(0.0, 0.006), LW), seg(gf, vec2(-0.004, 0.0), vec2(0.004, 0.0), LW * 0.8));
+  float tickOn = step(abs(gi.y), 2.0) * step(abs(gi.x), 4.0);
+  col = mix(col, lineC, tick * tickOn * (0.55 + 0.45 * step(hc(gi, uint(uHatN > 0 ? uHats[0].z : 0.0)), 0.3 * hh)));
+  // ось пунктиром
+  float dash = step(0.35, fract(p.x / 0.03));
+  col = mix(col, lineC, seg(p, vec2(-0.58, 0.0), vec2(0.66, 0.0), LW * 0.8) * dash * 0.8);
+  // пятна: синее (низ, кик) и красное (аккорды)
+  vec2 cB = vec2(-0.258, 0.0);
+  float vb = gau(p, cB, vec2(0.09, 0.08) * (0.8 + 0.25 * uLow + 0.3 * k) * pl) * (0.55 + 0.4 * uLow + 0.5 * k);
+  col = mix(col, uBlue, min(1.0, vb * 1.25));
+  vec2 q = mosaic(p);
+  float bar = box(q, vec2(-0.445, 0.0), vec2(0.065 + 0.04 * k, 0.022)) * (0.7 + 0.3 * k);
+  col = mix(col, mix(uBlue, vec3(0.45, 0.55, 1.0), 0.3), bar);
+  float vr = gau(p, vec2(-0.085, 0.0), vec2(0.05, 0.055) * (0.8 + 0.5 * st)) * (0.2 + 0.95 * st);
+  col = mix(col, uRed, min(1.0, vr * 1.3));
+  // дуги: золотые постоянные, белые серпы — эхо аккордов
+  float rho = length(p), th = atan(p.y, p.x);
+  float open = smoothstep(0.62, 0.5, cos(th));    // справа разрыв — там волна
+  for (int i = 0; i < 3; i++) { float r = float[3](0.32, 0.25, 0.178)[i] * (1.0 + 0.01 * uLowSlow); col = mix(col, uGold, ring(p, vec2(0.0), r, LW * 1.3) * open); }
   for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
-    float dz = wrap(zw - (s.w + 4.5)) / 0.07;
-    float ang = abs(mod(th - s.z + PI, TAU) - PI);
-    float span = 0.35 + 0.45 * fract(s.z * 3.7);
-    float arc = exp(-dz * dz) * (1.0 - smoothstep(span * 0.6, span, ang));
-    float env = s.y * smoothstep(0.0, 0.025, s.x) * exp(-s.x / 1.3) * uStabAmt * smoothstep(0.6, 1.6, z);
-    acc += arc * env * 1.8 * fog;
+    float a = s.y * exp(-s.x / 1.0) * uStabAmt * smoothstep(0.0, 0.03, s.x);
+    vec2 c = vec2(-0.04 - s.z * 0.035 - s.x * 0.06, 0.0);
+    float r = 0.19 + s.x * 0.05;
+    float crescent = ring(p, c, r, LW * 1.2) * smoothstep(0.2, -0.4, cos(atan(p.y - c.y, p.x - c.x)));
+    col = mix(col, lineC, crescent * a);
   }
-  // хэты: искры на кольцах
-  for (int i = 0; i < 4; i++) { if (i >= uHatN) break; vec4 hh = uHats[i];
-    float cellA = floor((th + PI) / TAU * 96.0);
-    float r = h3(uvec3(ri, uint(cellA), uint(hh.z) + uSeed));
-    float env = hh.y * exp(-hh.x / 0.09) * uHatAmt;
-    acc += step(r, 0.05 * env) * line * fog * 2.0;
+  // пиксельная волна трека справа от центра
+  float x0 = 0.0, x1 = 0.53;
+  if (p.x > x0 && p.x < x1) {
+    vec2 qq = mosaic(p);
+    float uc = (qq.x - x0) / (x1 - x0);
+    vec4 w = wave(0.5 + (uc - 0.5) * 0.6);
+    float env = smoothstep(0.0, 0.2, uc) * smoothstep(1.0, 0.55, uc);
+    float A = (0.03 + 0.2 * w.r * w.r + 0.08 * w.a) * env * pl;
+    float t = abs(qq.y) / max(A, 1e-4);
+    float v = (1.0 - smoothstep(0.6, 1.0, t)) * (0.6 + 0.4 * hc(qq / uBlk, 31u + uint(uTime * 25.0)));
+    vec3 c = mix(vec3(1.0), uGold, smoothstep(0.1, 0.35, t));
+    c = mix(c, uBlue, smoothstep(0.35, 0.7, t + 0.2 * hc(qq / uBlk, 33u)));
+    col = mix(col, c, smoothstep(0.08, 0.25, v));
   }
-  // свет в конце туннеля дышит низами
-  float glow = exp(-rho * rho / (0.0035 + 0.004 * uLow)) * (0.25 + 0.75 * uLow) * (1.0 - 0.5 * uBreak);
-  return vec2(L + glow * 0.8, acc);
+  col = mix(col, lineC, seg(p, vec2(0.366, -0.33), vec2(0.366, 0.33), LW * 1.4));
+  // легенда: квадраты загораются на событиях
+  float sq = 0.0105;
+  vec3 lc[8] = vec3[8](vec3(1.0), uRed, vec3(1.0), uBlue, uRed, uGold * 1.05, uRed, vec3(1.0));
+  float ly[8] = float[8](0.302, 0.151, 0.0, -0.075, -0.145, -0.2, -0.222, -0.302);
+  float le[8] = float[8](hh, st, uLowSlow, k, st, uLow, st * 0.6, hh * 0.7);
+  for (int i = 0; i < 8; i++) col = mix(col, lc[i], box(p, vec2(0.702, ly[i]), vec2(sq)) * (0.35 + 0.65 * min(1.0, le[i])));
+  col = mix(col, vec3(1.0), box(p, vec2(-0.68, 0.0), vec2(0.009)));
+  return col;
 }
 
-// ---------- сцена 1: точечное море (интро, брейк, аутро) ----------
-float seaH(vec2 xz, vec4 sd){          // xz — относительно камеры
-  float h = 0.0;
-  h += 0.060 * sin(dot(xz, vec2(0.62, 0.78)) * 1.7 + uSwell.x + sd.y * 6.0);
-  h += 0.040 * sin(dot(xz, vec2(-0.85, 0.52)) * 2.9 + uSwell.y + sd.z * 6.0);
-  h += 0.020 * sin(dot(xz, vec2(0.2, -0.98)) * 6.1 + uSwell.z);
-  h *= (0.55 + 0.9 * uLowSlow) * (1.0 - 0.45 * uBreak);
-  for (int i = 0; i < 6; i++) { if (i >= uKickN) break; vec4 k = uKicks[i];
-    vec2 c = vec2((fract(k.w * 7.31) - 0.5) * 3.0, wrap(k.z - uCam) * 0.35 + 3.5 + fract(k.w * 3.17) * 3.0);
-    float r = length(xz - c), front = k.x * 2.2;
-    h += 0.10 * k.y * uKickAmt * exp(-k.x / 0.8) * exp(-pow((r - front) / 0.18, 2.0)) * sin((r - front) * 18.0);
+// ---------- 3. «Поле» (светлая): силовые линии прогибаются вокруг синего пятна, крест с пиксельными пятнами, легенда ----------
+vec3 sceneField(vec2 p, vec4 sd){
+  vec3 col = vec3(0.925, 0.925, 0.918), ink = vec3(0.08, 0.08, 0.06);
+  float k = kickE(), pl = pulse(), st = min(1.2, uStab) * uStabAmt, hh = min(1.2, uHat) * uHatAmt;
+  float bx = -0.43 + 0.01 * sin(uTime * 0.21 + sd.y * 6.0);
+  float A = (0.055 + 0.05 * uLow + 0.07 * k + 0.02 * uSpring * uKickAmt) * pl;
+  for (int i = 0; i < 6; i++) {
+    float y0 = float[6](0.189, 0.138, 0.083, -0.083, -0.138, -0.189)[i];
+    float w = float[6](1.4, 0.9, 1.3, 1.3, 0.9, 1.4)[i] * LW;
+    float sgn = sign(y0), amp = A * float[6](1.0, 0.85, 0.6, 0.6, 0.85, 1.0)[i];
+    float x = p.x;
+    float y = y0 + sgn * amp * exp(-pow((x - bx) / 0.105, 2.0));
+    float dy = sgn * amp * exp(-pow((x - bx) / 0.105, 2.0)) * (-2.0 * (x - bx) / (0.105 * 0.105));
+    float d = abs(p.y - y) / sqrt(1.0 + dy * dy);
+    float on = step(-0.66, x) * step(x, -0.2);
+    col = mix(col, ink, (1.0 - smoothstep(w - PX * 0.6, w + PX * 0.6, d)) * on);
   }
-  return h;
-}
-vec2 sea(vec2 p, vec4 sd, float px){
-  float horizon = 0.11 + 0.012 * uSpring * uKickAmt;
-  vec3 ro = vec3(0.0, 0.62, 0.0);
-  vec3 rd = normalize(vec3(p.x, p.y - horizon, 1.15));
-  float fogK = 0.09 * uFog * (1.0 + 1.3 * uBreak);
-  // небо: луна над горизонтом, круги от аккордов расходятся вокруг неё
-  vec2 moon = vec2(sd.y * 0.5 - 0.25, horizon + 0.17);
-  float dm = length(p - moon);
-  float moonR = 0.045 + 0.01 * uLowSlow + 0.025 * uTension;
-  float sky = 0.03 + 0.10 * exp(-max(p.y - horizon, 0.0) * 6.0);
-  float moonL = (1.0 - smoothstep(moonR - px, moonR + px, dm)) * (0.55 + 0.45 * uLowSlow) + exp(-dm * dm / 0.02) * 0.18;
-  float acc = 0.0;
-  for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
-    float r = moonR + 0.012 + s.x * 0.15, w = 0.0025 + s.x * 0.004;
-    float env = s.y * smoothstep(0.0, 0.025, s.x) * exp(-s.x / 1.2) * uStabAmt;
-    acc += exp(-pow((dm - r) / w, 2.0)) * env * 1.4;
-  }
-  // перед дропом: на каждой доле от луны расходится кольцо, луна растёт
-  if (uTension > 0.0) { float r = moonR + 0.015 + uBeat * 0.22; acc += exp(-pow((dm - r) / (0.004 + uBeat * 0.01), 2.0)) * uTension * (1.0 - uBeat) * 1.2; }
-  if (rd.y > -0.002) return vec2(sky + moonL, acc);
-  float t = ro.y / -rd.y;
-  vec2 xz = ro.xz + rd.xz * t;
-  float e = 0.03, h0 = seaH(xz, sd);
-  vec3 n = normalize(vec3(h0 - seaH(xz + vec2(e, 0.0), sd), e, h0 - seaH(xz + vec2(0.0, e), sd)));
-  vec3 Ld = normalize(vec3(moon.x * 0.8, 0.22, 1.0));
-  vec3 rf = reflect(rd, n);
-  float spec = pow(max(dot(rf, Ld), 0.0), 60.0) * 1.6 + pow(max(dot(rf, Ld), 0.0), 8.0) * 0.25;
-  float fog = exp(-t * fogK);
-  float L = (0.04 + 0.12 * max(n.y, 0.0) + spec * (0.6 + 0.6 * uLowSlow)) * fog + (1.0 - fog) * 0.08;
-  // хэты: блики-искры на воде
-  for (int i = 0; i < 4; i++) { if (i >= uHatN) break; vec4 hh = uHats[i];
-    vec2 c = floor((xz + vec2(0.0, uSeaZ)) * 3.0);
-    float r = h3(uvec3(uvec2(ivec2(c) + 4096), uint(hh.z) + uSeed));
-    acc += step(r, 0.03 * hh.y * exp(-hh.x / 0.1) * uHatAmt) * fog * 1.5;
-  }
-  return vec2(L, acc * fog);
+  col = mix(col, ink, seg(p, vec2(-0.66, 0.0), vec2(-0.195, 0.0), LW * 1.2));
+  float bb = gau(p, vec2(bx, 0.0), vec2(0.04, 0.04) * (0.85 + 0.3 * uLow + 0.35 * k) * pl);
+  col = mix(col, uBlue, smoothstep(0.08, 0.75, bb));
+  // крест с пиксельными пятнами (перемножение красок)
+  vec2 c = vec2(0.067, 0.0), q = mosaic(p);
+  float vo = gau(q, c + vec2(0.015, -0.005), vec2(0.085, 0.05) * (0.8 + 0.5 * st)) * (0.3 + 0.9 * st);
+  vo = max(vo, gau(q, c + vec2(0.07, -0.03), vec2(0.04, 0.035)) * (0.25 + 0.8 * st));
+  float vbl = gau(q, c + vec2(-0.005, 0.06), vec2(0.04, 0.05) * (0.8 + 0.4 * k)) * (0.35 + 0.6 * uLow + 0.4 * k);
+  vbl = max(vbl, gau(q, c + vec2(0.01, -0.075), vec2(0.03, 0.04)) * (0.3 + 0.6 * uLow));
+  vec3 orange = mix(uRed, vec3(1.0, 0.45, 0.0), 0.35);
+  col *= mix(vec3(1.0), orange, smoothstep(0.12, 0.35, vo) * blockMask(vo, q, 41u));
+  col *= mix(vec3(1.0), uBlue * 0.95, smoothstep(0.12, 0.35, vbl) * blockMask(vbl, q, 43u));
+  col = mix(col, ink, seg(p, c + vec2(0.0, -0.28), c + vec2(0.0, 0.27), LW * 1.2));
+  col = mix(col, ink, seg(p, c + vec2(-0.185, 0.0), c + vec2(0.27, 0.0), LW * 1.2));
+  // справа: две вертикали, перекладина, легенда
+  col = mix(col, ink, seg(p, vec2(0.476, -0.275), vec2(0.476, 0.28), LW * 1.2));
+  col = mix(col, ink, seg(p, vec2(0.56, -0.275), vec2(0.56, 0.28), LW * 1.2));
+  col = mix(col, ink, seg(p, vec2(0.41, 0.0), vec2(0.62, 0.0), LW * 1.2));
+  col = mix(col, ink, seg(p, vec2(0.6, -0.104), vec2(0.614, -0.104), LW * 1.4));
+  vec3 lc[3] = vec3[3](uBlue * 1.1, uBlue * 0.8, ink);
+  float le[3] = float[3](k, hh, st);
+  for (int i = 0; i < 3; i++) col = mix(col, lc[i], box(p, vec2(0.671, -0.187 - 0.035 * float(i)), vec2(0.0105)) * (0.45 + 0.55 * min(1.0, le[i])));
+  return col;
 }
 
-vec2 scene(int id, vec2 p, vec4 sd, float px){ return id == 0 ? tunnel(p, sd, px) : sea(p, sd, px); }
-vec2 frameAt(vec2 p, float px){
-  vec2 a = scene(uSceneA, p, uSeedA, px);
-  if (uMix > 0.0) a = mix(a, scene(uSceneB, p, uSeedB, px), uMix);
-  a.x += uFlash;
-  // точка чёрного: в тенях бумага чистая, без сетки мелких точек
-  return clamp((a - 0.035) / 0.965, 0.0, 1.0);
-}
-// проход 1: значение сцены в каждом пикселе (x — основной цвет, y — второй) в текстуру
+vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : sceneField(p, sd); }
 void main(){
-  float H = uRes.y;
-  float pxs = uHalftone == 1 ? max(1.0, uCell * 0.5) / H : 1.0 / H;  // предфильтр в полъячейки растра — без муара
-  o = vec4(frameAt((gl_FragCoord.xy - 0.5 * uRes) / H, pxs), 0.0, 1.0);
+  PX = 1.0 / uRes.y; LW = max(0.55 * PX, 0.75 / 1080.0);
+  vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+  vec3 c = scene(uSceneA, p, uSeedA);
+  if (uMix > 0.0) c = mix(c, scene(uSceneB, p, uSeedB), uMix);
+  // дроп: из центра расходится тонкая ударная волна и гаснет за полсекунды
+  if (uFlash > 0.0) {
+    float r = uDropAge * 1.5, w = 0.002 + uDropAge * 0.01;
+    float a = uFlash * (1.0 - smoothstep(w - PX, w + PX, abs(length(p) - r)));
+    c = mix(c, vec3(1.0), a);
+    c += 0.06 * uFlash;
+  }
+  o = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
-// проход 2: печать — растр, второй цвет со сдвигом (берётся из той же текстуры), подписи, логотип, зерно
+// проход 2: зерно и логотип поверх сцены
 const FS_PRINT = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes; uniform sampler2D uScene;
-uniform int uHalftone; uniform float uCell, uAngle, uMisreg, uInk2Amt;
-uniform vec3 uPaper, uInk, uInk2;
 uniform float uGrain; uniform uint uFrame, uSeed;
-uniform sampler2D uOverlay; uniform int uHasOverlay;
 uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
 out vec4 o;
-const float TAU = 6.2831853;
 uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; return v; }
 float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
-// растр: «круглая точка» (Euclidean spot) — 0 в центре ячейки, 1 в углах. Краска там, где spot < тон.
-// Сцена посчитана в каждом пикселе, поэтому края предметов чёткие, а точки видны только в полутонах.
-float halftone(vec2 frag, float tone, float ang, float cs){
-  float c = cos(ang), s = sin(ang);
-  vec2 q = mat2(c, s, -s, c) * frag / cs * TAU;
-  float spot = 0.5 - 0.25 * (cos(q.x) + cos(q.y));
-  float d = tone - spot, w = max(fwidth(d), 1e-4) * 0.75;
-  return smoothstep(-w, w, d);
-}
 void main(){
   vec2 frag = gl_FragCoord.xy;
   float H = uRes.y;
-  vec2 v = texelFetch(uScene, ivec2(frag), 0).xy;
-  vec3 col;
-  if (uHalftone == 1) {
-    float a1 = radians(uAngle), a2 = radians(uAngle + 30.0);
-    col = mix(uPaper, uInk, halftone(frag, uInk2Amt > 0.0 ? v.x : min(1.0, v.x + v.y), a1, uCell));
-    if (uInk2Amt > 0.0) {
-      // второй цвет печатается со сдвигом (несовмещение красок), своим углом растра
-      float v2 = texture(uScene, (frag + vec2(uMisreg, -uMisreg * 0.6)) / uRes).y;
-      col = mix(col, uInk2, halftone(frag, v2, a2, uCell) * uInk2Amt);
-    }
-  } else {
-    col = mix(uPaper, uInk, uInk2Amt > 0.0 ? v.x : min(1.0, v.x + v.y));
-    col = mix(col, uInk2, v.y * uInk2Amt);
-  }
-  vec2 pix = vec2(frag.x, uRes.y - frag.y); // пиксели, y вниз
-  if (uHasOverlay == 1) { vec4 ov = texelFetch(uOverlay, ivec2(pix), 0); col = col * (1.0 - ov.a) + ov.rgb; }
+  vec3 col = texelFetch(uScene, ivec2(frag), 0).rgb;
+  vec2 pix = vec2(frag.x, uRes.y - frag.y);
   if (uHasLogo == 1) {
     vec2 lu = (pix - uLogoRect.xy) / uLogoRect.zw;
     if (all(greaterThanEqual(lu, vec2(0.0))) && all(lessThan(lu, vec2(1.0)))) { vec4 l = texture(uLogo, lu) * uLogoOpacity; col = col * (1.0 - l.a) + l.rgb; }
   }
-  if (uGrain > 0.0) col += uGrain * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.6))), uFrame);
+  // зерно: мельче на тёмном, как на плёнке; чуть сильнее в средних тонах
+  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  if (uGrain > 0.0) col += uGrain * (0.55 + 0.9 * l * (1.0 - l)) * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.4))), uFrame);
   o = vec4(clamp(col, 0.0, 1.0), 1.0);
 }`;
+
 
 // упаковка в I420 (BT.709, ограниченный диапазон), как в редакторе пластинки
 const FS_PACK = `#version 300 es
@@ -838,6 +917,8 @@ void main(){
   o = r;
 }`;
 
+const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u',
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -850,7 +931,7 @@ class Renderer {
     this.vao = gl.createVertexArray();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
-    this.overlayTex = this.makeTex(); this.logoTex = this.makeTex();
+    this.logoTex = this.makeTex(); this.waveTex = this.makeTex();
   }
   program(fs) {
     const gl = this.gl;
@@ -901,28 +982,26 @@ class Renderer {
     gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  // униформы ставим все, какие есть в программе (отсутствующие — без ошибок)
+  uploadWave(data) {
+    const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, this.waveTex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, data.length / 4, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  }
+  // униформы ставим все, какие есть в программе (отсутствующие — без ошибок); тип — по таблице UT
   pass(prog, target, s) {
     const gl = this.gl, { p, u } = prog;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target); gl.viewport(0, 0, this.W, this.H);
     gl.useProgram(p); gl.bindVertexArray(this.vao);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.overlayTex); gl.uniform1i(u.uOverlay, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.logoTex); gl.uniform1i(u.uLogo, 1);
-    if (prog === this.print) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.sceneTex); gl.uniform1i(u.uScene, 2); }
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.sceneTex); gl.uniform1i(u.uScene, 2);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.waveTex); gl.uniform1i(u.uWave, 3);
     gl.uniform2f(u.uRes, this.W, this.H);
-    gl.uniform1i(u.uSceneA, s.sceneA); gl.uniform1i(u.uSceneB, s.sceneB); gl.uniform1f(u.uMix, s.mix);
-    gl.uniform4fv(u.uSeedA, s.seedA); gl.uniform4fv(u.uSeedB, s.seedB);
-    gl.uniform1f(u.uCam, s.cam); gl.uniform2f(u.uVP, s.vp[0], s.vp[1]); gl.uniform3fv(u.uSwell, s.swell); gl.uniform1f(u.uSeaZ, s.seaZ);
-    for (const k of ['Kick', 'Spring', 'Hat', 'Low', 'Mid', 'High', 'LowSlow', 'Break', 'Tension', 'Flash', 'Fog', 'Rot', 'Roll', 'Beat', 'KickAmt', 'StabAmt', 'HatAmt', 'Cell', 'Angle', 'Misreg', 'Ink2Amt', 'Grain'])
-      gl.uniform1f(u['u' + k], s[k[0].toLowerCase() + k.slice(1)]);
-    gl.uniform4fv(u.uKicks, s.kicks); gl.uniform1i(u.uKickN, s.kickN);
-    gl.uniform4fv(u.uStabs, s.stabs); gl.uniform1i(u.uStabN, s.stabN);
-    gl.uniform4fv(u.uHats, s.hats); gl.uniform1i(u.uHatN, s.hatN);
-    gl.uniform1i(u.uHalftone, s.halftone);
-    gl.uniform3fv(u.uPaper, s.paper); gl.uniform3fv(u.uInk, s.inkC); gl.uniform3fv(u.uInk2, s.ink2C);
-    gl.uniform1ui(u.uFrame, s.frame >>> 0); gl.uniform1ui(u.uSeed, s.seedU >>> 0);
-    gl.uniform1i(u.uHasOverlay, s.hasOverlay);
-    gl.uniform4f(u.uLogoRect, ...s.logoRect); gl.uniform1i(u.uHasLogo, s.hasLogo); gl.uniform1f(u.uLogoOpacity, s.logoOpacity);
+    for (const [name, v] of Object.entries(s.U)) {
+      const loc = u[name]; if (!loc) continue;
+      const t = UT[name] || 'f';
+      if (t === 'f') gl.uniform1f(loc, v); else if (t === 'i') gl.uniform1i(loc, v); else if (t === 'u') gl.uniform1ui(loc, v >>> 0);
+      else if (t === '3') gl.uniform3fv(loc, v); else gl.uniform4fv(loc, v);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   readRGBA() {
@@ -948,7 +1027,6 @@ class Renderer {
 const RENDER_MODE = new URLSearchParams(location.search).has('render');
 const cv = document.getElementById('cv');
 const R = new Renderer(cv);
-const ov = document.createElement('canvas'), ovx = ov.getContext('2d');
 const state = {
   p: { ...VDEF }, raw: null, m: null, audioFile: null, audioName: '', duration: null,
   logo: null, defaultLogo: null, logoName: '', previewScale: 1, fullRes: false,
@@ -960,197 +1038,64 @@ function outSize() {
   return k === 1 ? { W, H } : { W: Math.round(W * k / 8) * 8, H: Math.round(H * k / 4) * 4 };
 }
 function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
-function colors() { const p = state.p, pal = PALETTES[p.palette]; return pal && p.palette !== 'custom' ? pal : { paper: p.paper, ink: p.ink, ink2: p.ink2 }; }
 function durationOf() { return state.duration || (state.m ? state.m.duration : 60); }
 function frameIndex(t) { return Math.floor(t * state.p.fps + 1e-6); }
 let dirtyMap = true;
 function ensureMap() { if (state.raw && (dirtyMap || !state.m)) { state.m = prepareMap(state.raw, state.p); dirtyMap = false; } }
-function trackTitle() { return (state.p.title || state.audioName.replace(/\.[^.]+$/, '') || 'UNTITLED').toUpperCase(); }
 
 /* ==========================================================================
    Кадр как функция времени
    ========================================================================== */
-const SCENE_ID = { tunnel: 0, sea: 1 };
-function sceneOfSection(s) { const p = state.p; if (p.scenes !== 'auto') return SCENE_ID[p.scenes]; return s.kick ? 0 : 1; }
-function seedOfSection(i) {
-  const s = state.p.seed, r = (k) => hash01(s * 7919 + i, k);
-  const sp = [0.5, 0.75, 1.0][Math.floor(r(1) * 3)];
-  return [sp, r(2), r(3), Math.floor(r(4) * 1000)];
+// грув — тёмные сцены (0, 2 по очереди), интро/брейк/аутро — светлые (1, 3)
+function sceneOfSection(s) {
+  const p = state.p; if (p.scenes !== 'auto') return +p.scenes;
+  const n = (s.n || 1) - 1;
+  if (s.kick) return n % 2 ? 2 : 0;
+  return s.type === 'intro' ? 1 : s.type === 'outro' ? 3 : (n % 2 ? 1 : 3);
 }
+function seedOfSection(i) { const s = state.p.seed, r = (k) => hash01(s * 7919 + i, k); return [r(1), r(2), r(3), Math.floor(r(4) * 1000)]; }
+function fmt(t) { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + s.toFixed(2).padStart(5, '0'); }
+const WAVE_COLS = 256, WAVE_SPAN = 6;   // «волна» в кадре: 6 с вокруг текущего момента
 function frameState(t) {
   ensureMap();
-  const p = state.p, m = state.m, c = colors(), { W, H } = outSize();
+  const p = state.p, m = state.m;
   const ts = t + p.syncMs / 1000;
-  const st = { paper: hexToRgb(c.paper), inkC: hexToRgb(c.ink), ink2C: hexToRgb(c.ink2), ink2Amt: p.ink2Amt, halftone: p.halftone ? 1 : 0,
-    cell: Math.max(2, p.cell * H / 1080), angle: p.angle, misreg: p.misreg * H / 1080, grain: p.grain, frame: frameIndex(t), seedU: p.seed,
-    kickAmt: p.kickAmt, stabAmt: p.stabAmt, hatAmt: p.hatAmt, fog: p.fog,
-    kicks: new Float32Array(24), stabs: new Float32Array(48), hats: new Float32Array(16), kickN: 0, stabN: 0, hatN: 0,
-    sceneA: 1, sceneB: 1, mix: 0, seedA: [0.75, 0.3, 0.6, 1], seedB: [0.75, 0.3, 0.6, 1], cam: 0, vp: [0, 0], swell: [0, 0, 0], seaZ: 0,
-    kick: 0, spring: 0, hat: 0, low: 0, mid: 0, high: 0, lowSlow: 0, break: 0, tension: 0, flash: 0, rot: 0, roll: 0, beat: 0,
-    hasOverlay: 0, logoRect: [0, 0, 1, 1], hasLogo: 0, logoOpacity: p.logoOpacity };
+  const U = { uMix: 0, uSceneA: 0, uSceneB: 0, uSeedA: [0.3, 0.5, 0.7, 1], uSeedB: [0.3, 0.5, 0.7, 1],
+    uKick: 0, uSpring: 0, uHat: 0, uLow: 0, uMid: 0, uHigh: 0, uLowSlow: 0, uStab: 0, uTension: 0, uFlash: 0, uBeat: 0, uTime: ts % 1000,
+    uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
+    uKicks: new Float32Array(24), uStabs: new Float32Array(48), uHats: new Float32Array(16), uKickN: 0, uStabN: 0, uHatN: 0,
+    uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
+    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity };
+  const st = { U, ts };
   if (!m) return st;
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
-  const bar = 4 * m.beatLen;
-  // сцены и переход между секциями: дроп — резкая склейка со вспышкой, остальное — растворение за такт
-  st.sceneA = sceneOfSection(sec); st.seedA = seedOfSection(si);
+  // смена сцены: на дропе — склейка со вспышкой, в остальных случаях растворение за долю
+  U.uSceneA = sceneOfSection(sec); U.uSeedA = seedOfSection(si);
   if (prev && sec.trans !== 'drop') {
-    const u = (ts - sec.t) / bar;
-    if (u < 1) { st.sceneB = st.sceneA; st.seedB = st.seedA; st.sceneA = sceneOfSection(prev); st.seedA = seedOfSection(si - 1); st.mix = u * u * (3 - 2 * u); }
+    const u = (ts - sec.t) / m.beatLen;
+    if (u < 1) { U.uSceneB = U.uSceneA; U.uSeedB = U.uSeedA; U.uSceneA = sceneOfSection(prev); U.uSeedA = seedOfSection(si - 1); U.uMix = u * u * (3 - 2 * u); }
   }
-  // брейк: 1 в секциях без кика, плавно за такт
-  const bk = (s) => s && !s.kick ? 1 : 0;
-  const ub = prev ? Math.min(1, Math.max(0, (ts - sec.t) / bar)) : 1;
-  st.break = bk(prev) + (bk(sec) - bk(prev)) * ub;
-  st.tension = tensionAt(m, ts);
-  st.flash = Math.min(0.6, dropAt(m, ts, 0.3) * 0.55 * p.flashAmt); // мягкая вспышка: без полного белого кадра
-  { const bp = (ts - m.beat0) / m.beatLen; st.beat = m.grid ? bp - Math.floor(bp) : 0; }
-  const camW = camAt(m, ts);
-  st.cam = camW % 3072;
-  // море: фазы волн в double, чтобы на часе ролика не было ни ступенек, ни скачков
-  const zc = camW * 0.35, ph = (k, dy, w) => ((k * dy * zc - w * ts) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-  st.swell = [ph(1.7, 0.78, 1.1), ph(2.9, 0.52, 1.6), ph(6.1, -0.98, 2.6)];
-  st.seaZ = zc % 1024;
-  st.rot = ts * 0.35;
-  st.roll = (ts * 0.018 + st.seedA[2] * 6.283) % 6.283185307 + 0.012 * st.spring;
+  U.uTension = tensionAt(m, ts);
+  U.uFlash = Math.min(1, dropAt(m, ts, 0.5) * p.flashAmt); U.uDropAge = sec.trans === 'drop' ? ts - sec.t : 99;
+  if (m.grid) { const bp = (ts - m.beat0) / m.beatLen; U.uBeat = bp - Math.floor(bp); }
   const env = (k) => sample(m.env[k], ts, 1 / 255);
-  st.low = env('low'); st.mid = env('mid'); st.high = env('high');
-  st.lowSlow = sample(m.lowSlow, ts);
-  st.kick = Math.min(1.5, envSum(m.kicks, ts, 0.16, 1.2));
-  st.spring = springSum(m.kicks, ts, 2.6, 0.32, 1.6);
-  st.hat = Math.min(1.5, envSum(m.hats, ts, 0.07, 0.5));
-  st.vp = [0.07 * Math.sin(ts * 0.21 + st.seedA[1] * 6) * (1 - st.tension), 0.045 * Math.sin(ts * 0.17 + st.seedA[2] * 6) * (1 - st.tension)];
-  // события для шейдера: возраст, сила, путь камеры в момент удара, seed
-  recentEvents(m.kicks, ts, 2.5, 6).forEach((i, k) => { st.kicks.set([ts - m.kicks.t[i], m.kicks.s[i], camAt(m, m.kicks.t[i]) % 3072, hash01(i, 5)], k * 4); st.kickN = k + 1; });
-  recentEvents(m.stabs, ts, 4.5, 12).forEach((i, k) => {
-    const chain = m.stabChain[i], echo = m.stabEcho[i];
-    const ang = (hash01(chain, 9) * 2 - 1) * Math.PI + echo * (echo % 2 ? 1.1 : -0.7);
-    st.stabs.set([ts - m.stabs.t[i], m.stabs.s[i], ang, camAt(m, m.stabs.t[i]) % 3072], k * 4); st.stabN = k + 1;
-  });
-  recentEvents(m.hats, ts, 0.5, 4).forEach((i, k) => { st.hats.set([ts - m.hats.t[i], m.hats.s[i], i, 0], k * 4); st.hatN = k + 1; });
-  st.sec = sec; st.si = si; st.ts = ts;
+  U.uLow = env('low'); U.uMid = env('mid'); U.uHigh = env('high'); U.uLowSlow = sample(m.lowSlow, ts);
+  U.uKick = Math.min(1.5, envSum(m.kicks, ts, 0.16, 1.2));
+  U.uSpring = springSum(m.kicks, ts, 2.6, 0.32, 1.6);
+  U.uHat = Math.min(1.5, envSum(m.hats, ts, 0.07, 0.5));
+  U.uStab = Math.min(1.5, envSum(m.stabs, ts, 0.35, 2));
+  recentEvents(m.kicks, ts, 2.5, 6).forEach((i, k) => { U.uKicks.set([ts - m.kicks.t[i], m.kicks.s[i], hash01(i, 5), 0], k * 4); U.uKickN = k + 1; });
+  recentEvents(m.stabs, ts, 4.5, 12).forEach((i, k) => { U.uStabs.set([ts - m.stabs.t[i], m.stabs.s[i], m.stabEcho[i], hash01(m.stabChain[i], 9)], k * 4); U.uStabN = k + 1; });
+  recentEvents(m.hats, ts, 0.5, 4).forEach((i, k) => { U.uHats.set([ts - m.hats.t[i], m.hats.s[i], i, 0], k * 4); U.uHatN = k + 1; });
+  // волна: громкость полос вокруг «сейчас»
+  const wv = new Uint8Array(WAVE_COLS * 4), keys = ['full', 'low', 'mid', 'high'];
+  for (let i = 0; i < WAVE_COLS; i++) {
+    const tt = ts + (i / (WAVE_COLS - 1) - 0.5) * WAVE_SPAN;
+    if (tt < 0 || tt > m.duration) continue;
+    for (let c = 0; c < 4; c++) wv[i * 4 + c] = Math.round(sample(m.env[keys[c]], tt));
+  }
+  st.wave = wv; st.sec = sec; st.si = si;
   return st;
-}
-
-/* ==========================================================================
-   Подписи: ленты с данными трека, отметки событий, пометки «от руки». Тоже чистая функция времени.
-   ========================================================================== */
-function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const SANS = '"Helvetica Neue", Helvetica, Arial, sans-serif', MONO = '"SF Mono", Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace';
-function tape(g, x, y, text, size, rot, fg, bg, reveal = 1, alpha = 1) {
-  if (alpha <= 0 || reveal <= 0) return;
-  g.save(); g.globalAlpha = alpha; g.translate(x, y); g.rotate(rot * Math.PI / 180);
-  g.font = `700 ${size}px ${SANS}`; g.letterSpacing = `${(size * 0.14).toFixed(1)}px`;
-  const w = g.measureText(text).width, padX = size * 0.5, h = size * 1.42;
-  const shown = text.slice(0, Math.ceil(text.length * Math.min(1, reveal)));
-  // лента с неровными торцами
-  g.fillStyle = bg; g.beginPath(); g.moveTo(0, 0);
-  const tw = w + padX * 2 - size * 0.14, R = mulberry32(text.length * 131 + Math.round(size));
-  g.lineTo(tw, 0); for (let i = 1; i <= 4; i++) g.lineTo(tw + (R() - 0.5) * size * 0.18, h * i / 4);
-  g.lineTo(0, h); for (let i = 3; i >= 1; i--) g.lineTo((R() - 0.5) * size * 0.18, h * i / 4);
-  g.closePath(); g.fill();
-  g.fillStyle = fg; g.textBaseline = 'middle'; g.fillText(shown, padX, h * 0.53);
-  g.restore();
-  return { w: w + padX * 2, h };
-}
-function scribble(g, cx, cy, rx, ry, prog, seed, lw, color, alpha) {
-  if (prog <= 0 || alpha <= 0) return;
-  const R = mulberry32(seed), ph1 = R() * 6.28, ph2 = R() * 6.28, a1 = 0.04 + 0.03 * R(), a2 = 0.02 + 0.02 * R(), start = R() * 6.28, turns = 1.18;
-  g.save(); g.globalAlpha = alpha; g.strokeStyle = color; g.lineWidth = lw; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath();
-  const n = 160, end = Math.max(1, Math.floor(n * Math.min(1, prog)));
-  for (let i = 0; i <= end; i++) {
-    const u = i / n, a = start + u * turns * Math.PI * 2, k = 1 + a1 * Math.sin(3 * a + ph1) + a2 * Math.sin(7 * a + ph2) + 0.05 * u;
-    const x = cx + rx * k * Math.cos(a), y = cy + ry * k * Math.sin(a);
-    i ? g.lineTo(x, y) : g.moveTo(x, y);
-  }
-  g.stroke(); g.restore();
-}
-function fmt(t) { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + s.toFixed(2).padStart(5, '0'); }
-const SEC_NAME = { intro: 'INTRO', groove: 'GROOVE', break: 'BREAK', outro: 'OUTRO' };
-function drawOverlay(st, W, H) {
-  const p = state.p, m = state.m, c = colors(), u = H / 1080;
-  if (ov.width !== W || ov.height !== H) { ov.width = W; ov.height = H; }
-  const g = ovx; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
-  if (!m || !p.overlay) return false;
-  const ts = st.ts, P = m.beatLen, bar = 4 * P;
-  const beatPos = (ts - m.beat0) / P, beatI = Math.floor(beatPos), barI = Math.floor((beatI - m.barPhase) / 4), inBar = ((beatI - m.barPhase) % 4 + 4) % 4;
-  const tapeBg = c.ink, tapeFg = c.paper;
-  // 1) название: печатается по шестнадцатым с начала трека
-  const t16 = m.grid ? P / 4 : 0.06;
-  const artist = (p.artist || '').toUpperCase(), title = trackTitle();
-  const rev = (len, t0) => Math.min(1, Math.max(0, (ts - t0) / (t16 * len)));
-  const x0 = 46 * u, y0 = 44 * u;
-  if (artist) tape(g, x0, y0, artist, 22 * u, -1.2, tapeFg, tapeBg, rev(artist.length, 0.4));
-  tape(g, x0 + 10 * u, y0 + 40 * u, title, 34 * u, 0.8, tapeFg, tapeBg, rev(title.length, 0.4 + t16 * artist.length));
-  // 2) карточка данных внизу слева: темп, такт, время, секция, отсчёт до дропа, индикаторы ударов, уровни
-  const lx = 50 * u, ly = H - 150 * u, fs = 16 * u, lh = 23 * u;
-  g.save(); g.globalAlpha = 0.84; g.fillStyle = c.paper; g.fillRect(lx - 14 * u, ly - 26 * u, 392 * u, 140 * u);
-  g.globalAlpha = 0.55; g.strokeStyle = c.ink; g.lineWidth = 1 * u; g.strokeRect(lx - 14 * u, ly - 26 * u, 392 * u, 140 * u); g.restore();
-  g.font = `500 ${fs}px ${MONO}`; g.textBaseline = 'alphabetic'; g.letterSpacing = '0px'; g.fillStyle = c.ink;
-  const pad = (n, k) => String(Math.max(0, n)).padStart(k, '0');
-  const sixteenth = Math.floor((beatPos - beatI) * 4);
-  g.globalAlpha = 0.95;
-  g.fillText(m.grid ? `BPM ${(60 / P).toFixed(2)}   BAR ${pad(barI + 1, 3)}.${inBar + 1}.${sixteenth + 1}` : 'BPM —   BAR —', lx, ly);
-  g.fillText(`TIME ${fmt(ts)} / ${fmt(m.duration)}`, lx, ly + lh);
-  const sec = st.sec, secLabel = `${SEC_NAME[sec.type] || sec.type.toUpperCase()}${sec.n ? ' ' + pad(sec.n, 2) : ''}`;
-  const next = m.sections[st.si + 1];
-  let cd = '';
-  if (next && next.trans === 'drop' && m.grid) {
-    const left = next.t - ts, beats = Math.ceil(left / P - 1e-6);
-    cd = beats <= 4 ? `   DROP IN ${beats}` : left < 8 * bar ? `   DROP IN ${Math.ceil(left / bar - 1e-6)} BARS` : '';
-  }
-  g.fillText(`SECTION ▸ ${secLabel}${cd}`, lx, ly + 2 * lh);
-  // индикаторы: горят на ударах
-  const ind = [['KICK', st.kick], ['CHORD', Math.min(1, envSum(m.stabs, ts, 0.12, 0.6))], ['HAT', st.hat]];
-  ind.forEach(([name, v], i) => {
-    const x = lx + i * 96 * u, y = ly + 3 * lh + 8 * u;
-    g.globalAlpha = 0.3 + 0.7 * Math.min(1, v);
-    g.beginPath(); g.arc(x + 6 * u, y - 5 * u, 6 * u, 0, Math.PI * 2); g.fillStyle = v > 0.25 ? c.ink2 : c.ink; g.fill();
-    g.fillStyle = c.ink; g.fillText(name, x + 17 * u, y);
-  });
-  // полосы-уровни с удержанием пика
-  [['L', m.env.low], ['M', m.env.mid], ['H', m.env.high]].forEach(([name, arr], i) => {
-    const x = lx + 312 * u + i * 18 * u, y = ly - 12 * u, hh = 84 * u, v = sample(arr, ts, 1 / 255);
-    let pk = 0; for (let k = 0; k < 80; k++) pk = Math.max(pk, sample(arr, ts - k / 100, 1 / 255) - k * 0.006);
-    g.globalAlpha = 0.22; g.fillStyle = c.ink; g.fillRect(x, y, 9 * u, hh);
-    g.globalAlpha = 0.9; g.fillRect(x, y + hh * (1 - v), 9 * u, hh * v);
-    g.fillRect(x - 2 * u, y + hh * (1 - pk) - 1 * u, 13 * u, 2 * u);
-    g.globalAlpha = 0.8; g.font = `500 ${11 * u}px ${MONO}`; g.fillText(name, x + 1 * u, y + hh + 14 * u);
-    g.font = `500 ${fs}px ${MONO}`;
-  });
-  g.globalAlpha = 1;
-  // 3) штамп секции: печатается за долю, держится два такта, потом зачёркивается и гаснет
-  if (st.si > 0 || ts > bar) {
-    const age = ts - sec.t, life = 2 * bar;
-    if (age >= 0 && age < life + bar) {
-      const big = sec.trans === 'drop', text = big ? 'DROP' : sec.trans === 'break' ? 'BREAK' : secLabel;
-      const size = (big ? 64 : 40) * u, fade = age < life ? 1 : 1 - (age - life) / bar;
-      const x = W * 0.5 - (big ? 120 : 90) * u, y = H * (big ? 0.16 : 0.18);
-      const box = tape(g, x, y, text, size, big ? -3 : 2, tapeFg, tapeBg, age / (P * 0.75), fade);
-      if (box && age > life * 0.75) { g.save(); g.globalAlpha = fade; g.strokeStyle = c.ink2; g.lineWidth = 4 * u; g.beginPath(); const k = Math.min(1, (age - life * 0.75) / (P * 0.5)); g.moveTo(x - 6 * u, y + box.h * 0.6); g.lineTo(x - 6 * u + (box.w + 12 * u) * k, y + box.h * 0.45); g.stroke(); g.restore(); }
-      if (big && p.marks) scribble(g, W / 2 + st.vp[0] * H, H / 2 - st.vp[1] * H, 0.2 * H, 0.15 * H, age / 0.45, Math.round(sec.t * 1000), 5 * u, c.ink2, fade);
-    }
-  }
-  // 4) подпись к последнему аккорду в туннеле: выноска к дуге
-  if (st.sceneA === 0 && st.mix < 0.5 && p.stabAmt > 0) {
-    const ids = recentEvents(m.stabs, ts, 1.4, 1);
-    if (ids.length) {
-      const i = ids[0], age = ts - m.stabs.t[i], z = (camAt(m, m.stabs.t[i]) + 4.5) - camAt(m, ts);
-      if (z > 0.35) {
-        const ang = (hash01(m.stabChain[i], 9) * 2 - 1) * Math.PI + m.stabEcho[i] * (m.stabEcho[i] % 2 ? 1.1 : -0.7);
-        const rho = 0.42 / z, ax = W / 2 + (st.vp[0] + rho * Math.cos(ang)) * H, ay = H / 2 - (st.vp[1] + rho * Math.sin(ang)) * H;
-        if (ax > 60 * u && ax < W - 260 * u && ay > 120 * u && ay < H - 200 * u) {
-          const a = Math.min(1, age / 0.06) * Math.exp(-age / 0.9), lxx = ax + 60 * u, lyy = ay - 50 * u;
-          g.save(); g.globalAlpha = a; g.strokeStyle = c.ink; g.lineWidth = 1.5 * u; g.beginPath(); g.moveTo(ax, ay); g.lineTo(lxx, lyy); g.lineTo(lxx + 26 * u, lyy); g.stroke(); g.restore();
-          tape(g, lxx + 28 * u, lyy - 14 * u, m.stabEcho[i] ? `ECHO ${m.stabEcho[i]}` : 'CHORD', 16 * u, 0, tapeFg, tapeBg, 1, a);
-        }
-      }
-    }
-  }
-  // 5) метки совмещения по углам, как на печатном листе
-  g.globalAlpha = 0.5; g.strokeStyle = c.ink; g.lineWidth = 1 * u;
-  for (const [x, y] of [[22 * u, 22 * u], [W - 22 * u, 22 * u]]) { g.beginPath(); g.arc(x, y, 7 * u, 0, Math.PI * 2); g.moveTo(x - 12 * u, y); g.lineTo(x + 12 * u, y); g.moveTo(x, y - 12 * u); g.lineTo(x, y + 12 * u); g.stroke(); }
-  g.globalAlpha = 1;
-  return true;
 }
 
 let logoKey = '';
@@ -1164,14 +1109,14 @@ function prepareLogo(st, W, H) {
     const g = cnv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, lw, lh);
     R.upload(R.logoTex, cnv); logoKey = key;
   }
-  st.hasLogo = 1; st.logoRect = [Math.round(W - p.logoRight * H - lw), Math.round(H - p.logoBottom * H - lh), lw, lh];
+  st.U.uHasLogo = 1; st.U.uLogoRect = [Math.round(W - p.logoRight * H - lw), Math.round(H - p.logoBottom * H - lh), lw, lh];
 }
 
 function seek(t) {
   const { W, H } = outSize();
   R.setSize(W, H);
   const st = frameState(t);
-  if (state.m) { st.hasOverlay = drawOverlay(st, W, H) ? 1 : 0; if (st.hasOverlay) R.upload(R.overlayTex, ov); }
+  R.uploadWave(st.wave || new Uint8Array(WAVE_COLS * 4));
   prepareLogo(st, W, H);
   R.draw(st);
   return st;
@@ -1193,7 +1138,7 @@ window.VZ = {
   getMap: () => state.raw && mapToJSON(state.raw),
   setDuration(sec) { state.duration = sec; },
   setTitle(name) { state.audioName = name; },
-  seek: (t) => { const st = seek(t); return { scene: st.sceneA, mix: st.mix, kick: st.kick, flash: st.flash, tension: st.tension, sec: st.sec && st.sec.type }; },
+  seek: (t) => { const st = seek(t), U = st.U; return { scene: U.uSceneA, mix: U.uMix, kick: U.uKick, stab: U.uStab, flash: U.uFlash, tension: U.uTension, sec: st.sec && st.sec.type }; },
   async hashFrame(n) { seek(n / state.p.fps); return sha256hex(R.readRGBA()); },
   pngFrame(n) { seek(n / state.p.fps); return cv.toDataURL('image/png').split(',')[1]; },
   async h264Support(W, H, fps, bitrate) {
@@ -1320,7 +1265,7 @@ function redraw() {
   if (state.m && st.sec) {
     const m = state.m, beatPos = (st.ts - m.beat0) / m.beatLen;
     $('stBeat').textContent = m.grid ? `${(60 / m.beatLen).toFixed(2)} BPM · такт ${Math.floor((Math.floor(beatPos) - m.barPhase) / 4) + 1}` : 'без сетки';
-    $('stSec').textContent = `секция: ${({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[st.sec.type] || st.sec.type}${st.sec.n ? ' ' + st.sec.n : ''} · сцена: ${['туннель', 'море'][st.sceneA]}`;
+    $('stSec').textContent = `секция: ${({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[st.sec.type] || st.sec.type}${st.sec.n ? ' ' + st.sec.n : ''} · сцена: ${SCENE_NAMES[st.U.uSceneA]}`;
   }
   drawTimelineTop(t);
 }
@@ -1402,11 +1347,9 @@ function buildControls() {
   }
 }
 function syncControls() { for (const f of Object.values(controls)) f(); }
-const MAP_KEYS = new Set(['speed', 'bpmFix', 'gridShiftMs']);
+const MAP_KEYS = new Set(['bpmFix', 'gridShiftMs']);
 function set(key, val) {
   state.p[key] = val;
-  if (key === 'palette' && PALETTES[val]) Object.assign(state.p, PALETTES[val]);
-  if (['paper', 'ink', 'ink2'].includes(key)) state.p.palette = 'custom';
   if (MAP_KEYS.has(key)) { dirtyMap = true; ensureMap(); drawTimelineBase(); }
   syncControls();
   try { localStorage.setItem('vinyl-spin:viz', JSON.stringify(state.p)); } catch (e) { }
