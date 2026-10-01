@@ -138,7 +138,7 @@ const DEFAULTS = Object.freeze({
   diskDiam: 0.90, diskX: 0, diskY: 0, rpm: 100 / 3, dir: 1, startDeg: 0,
   imgScale: 1, imgX: 0, imgY: 0, shutter: 0, blurN: 16,
   holeDiam: 0.073, holeMode: 'color', holeColor: '#c0c0c0', holeGrain: true,
-  zoomFrom: 1.0, zoomTo: 1.15, zoomCurve: 'linear', bgX: 0, bgY: 0,
+  zoomFrom: 1.0, zoomTo: 1.15, zoomCurve: 'linear', bgX: 0, bgY: 0, bgMono: false,
   grainAmt: 0.065, grainSize: 2.5, grainMode: 'add', grainSeed: 1,
   logoMode: 'default', logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
   bitrate: 25, gopSec: 0.5,
@@ -171,6 +171,7 @@ const SCHEMA = [
     { key: 'holeGrain', label: 'Зерно на заливке', type: 'check' },
   ]},
   { title: 'Фон и зум', open: true, items: [
+    { key: 'bgMono', label: 'Фон в ч/б', type: 'check' },
     { key: 'zoomFrom', label: 'Масштаб в начале', min: 1, max: 2, step: 0.001 },
     { key: 'zoomTo', label: 'Масштаб в конце', min: 1, max: 2, step: 0.001 },
     { key: 'zoomCurve', label: 'Кривая', type: 'select', options: [['linear', 'линейно'], ['easeInOut', 'плавно в начале и в конце'], ['easeOut', 'плавно в конце'], ['easeIn', 'плавно в начале']] },
@@ -227,7 +228,7 @@ const FS_COMPOSITE = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes;
 uniform sampler2D uBg, uDisk, uLogo;
-uniform vec2 uBgCover; uniform float uBgScale; uniform vec2 uBgAnchor;
+uniform vec2 uBgCover; uniform float uBgScale; uniform vec2 uBgAnchor; uniform int uBgMono;
 uniform vec2 uDiskC; uniform float uDiskR; uniform float uAngle; uniform float uBlurAng; uniform int uBlurN;
 uniform float uImgScale; uniform vec2 uImgOff;
 uniform float uHoleR; uniform int uHoleMode; uniform vec3 uHoleColor; uniform int uHoleGrain;
@@ -273,6 +274,7 @@ void main(){
   // фон: cover-fit, зум вокруг центра кадра
   vec2 uv = uBgAnchor + (p - 0.5 * uRes) / (uBgCover * uBgScale);
   vec3 bg = texture(uBg, uv).rgb;
+  if (uBgMono == 1) bg = vec3(dot(bg, vec3(0.2126, 0.7152, 0.0722))); // ч/б: яркость по BT.709
   float n = uGrainAmt > 0.0 ? grain(p) : 0.0;
   vec3 col = applyGrain(bg, n);
 
@@ -394,7 +396,7 @@ class Renderer {
     const bind = (unit, tex, name) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(u[name], unit); };
     bind(0, this.tex.bg, 'uBg'); bind(1, this.tex.disk, 'uDisk'); bind(2, this.tex.logo, 'uLogo');
     gl.uniform2f(u.uRes, this.W, this.H);
-    gl.uniform2f(u.uBgCover, s.bgCover[0], s.bgCover[1]); gl.uniform1f(u.uBgScale, s.zoom); gl.uniform2f(u.uBgAnchor, s.bgAnchor[0], s.bgAnchor[1]);
+    gl.uniform2f(u.uBgCover, s.bgCover[0], s.bgCover[1]); gl.uniform1f(u.uBgScale, s.zoom); gl.uniform2f(u.uBgAnchor, s.bgAnchor[0], s.bgAnchor[1]); gl.uniform1i(u.uBgMono, s.bgMono);
     gl.uniform2f(u.uDiskC, s.diskC[0], s.diskC[1]); gl.uniform1f(u.uDiskR, s.diskR); gl.uniform1f(u.uAngle, s.angle);
     gl.uniform1f(u.uBlurAng, s.blurAng); gl.uniform1i(u.uBlurN, s.blurN);
     gl.uniform1f(u.uImgScale, s.imgScale); gl.uniform2f(u.uImgOff, s.imgOff[0], s.imgOff[1]);
@@ -563,7 +565,7 @@ function prepare() {
 function frameState(t) {
   const p = state.p, g = state.geo, T = durationOf(), { H } = outSize();
   return {
-    bgCover: g.bgCover, bgAnchor: g.bgAnchor, zoom: zoomAt(p, t, T),
+    bgCover: g.bgCover, bgAnchor: g.bgAnchor, zoom: zoomAt(p, t, T), bgMono: p.bgMono ? 1 : 0,
     diskC: g.diskC, diskR: g.diskR, angle: angleAt(p, t),
     blurAng: p.shutter > 0 ? 2 * Math.PI * p.rpm / 60 * (p.shutter / 360) / p.fps : 0, blurN: Math.round(p.blurN),
     imgScale: p.imgScale, imgOff: [p.imgX, p.imgY],
