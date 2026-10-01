@@ -8,13 +8,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { audioPlan, ffmpegArgs, startFfmpeg, verifyOutput, ffmpegVersion } from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const NO_OPEN = argv.includes('--no-open');
+// версия кода сервера: если на порту висит старая копия (запущена до git pull), новая её сменит
+const VERSION = crypto.createHash('sha1').update(fs.readFileSync(fileURLToPath(import.meta.url))).update(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib.mjs'))).digest('hex').slice(0, 12);
 const PORT = Number(process.env.VS_PORT) || 8420;
 const OUT_DIR = process.env.VS_OUT || path.join(os.homedir(), 'Movies', 'vinyl-spin');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vinyl-spin-'));
@@ -64,7 +66,11 @@ async function handle(req, res) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     fs.createReadStream(path.join(HERE, p === '/viz.html' ? 'viz.html' : 'index.html')).pipe(res); return;
   }
-  if (req.method === 'GET' && p === '/api/ping') return json(res, 200, { ok: true, ffmpeg: ffver, platform: process.platform, outDir: OUT_DIR });
+  if (req.method === 'GET' && p === '/api/ping') return json(res, 200, { ok: true, version: VERSION, ffmpeg: ffver, platform: process.platform, outDir: OUT_DIR });
+  if (req.method === 'POST' && p === '/api/quit') {
+    if (jobs.size) return json(res, 409, { error: 'идёт рендер' });
+    json(res, 200, { ok: true }); log('остановлен: запущена новая версия'); setTimeout(cleanup, 100); return;
+  }
 
   // звук: браузер присылает файл целиком, сервер кладёт его во временную папку и решает, как его вшить
   if (req.method === 'POST' && p === '/api/audio') {
@@ -127,14 +133,29 @@ async function handle(req, res) {
 const server = http.createServer((req, res) => handle(req, res).catch(e => { log('ошибка:', e.message); if (!res.headersSent) json(res, 500, { error: e.message }); else res.end(); }));
 server.requestTimeout = 0; // длинные загрузки звука и потоки видео
 
+// старая копия: сначала просим выйти, если не умеет — завершаем процесс node studio.mjs, который держит порт
+async function stopOld(port) {
+  try { const r = await fetch(`http://127.0.0.1:${port}/api/quit`, { method: 'POST' }); if (r.ok) { await new Promise(r => setTimeout(r, 400)); return true; } if (r.status === 409) return false; } catch { }
+  if (process.platform === 'win32') return false;
+  try {
+    const pids = execFileSync('lsof', ['-ti', `tcp:${port}`, '-sTCP:LISTEN']).toString().trim().split(/\s+/).filter(Boolean);
+    let killed = false;
+    for (const pid of pids) {
+      const cmd = execFileSync('ps', ['-o', 'command=', '-p', pid]).toString();
+      if (/studio\.mjs/.test(cmd) && Number(pid) !== process.pid) { process.kill(Number(pid), 'SIGTERM'); killed = true; }
+    }
+    if (killed) await new Promise(r => setTimeout(r, 600));
+    return killed;
+  } catch { return false; }
+}
 function listen(port) {
   server.once('error', async (e) => {
     if (e.code !== 'EADDRINUSE') throw e;
-    // уже запущен? тогда просто открываем редактор
-    try {
-      const r = await fetch(`http://127.0.0.1:${port}/api/ping`);
-      if ((await r.json()).ok) { console.log(`vinyl-spin уже запущен: http://127.0.0.1:${port}/`); if (!NO_OPEN) openInBrowser(`http://127.0.0.1:${port}/`); process.exit(0); }
-    } catch { }
+    // уже запущен? та же версия — просто открываем редактор; старая — останавливаем её и занимаем порт
+    let info = null;
+    try { info = await (await fetch(`http://127.0.0.1:${port}/api/ping`)).json(); } catch { }
+    if (info?.ok && info.version === VERSION) { console.log(`vinyl-spin уже запущен: http://127.0.0.1:${port}/`); if (!NO_OPEN) openInBrowser(`http://127.0.0.1:${port}/`); process.exit(0); }
+    if (info?.ok && port < PORT + 5 && await stopOld(port)) { console.log('Остановил старую копию vinyl-spin, запускаю новую.'); return setTimeout(() => listen(port), 300); }
     listen(port + 1);
   });
   server.listen(port, '127.0.0.1', () => {

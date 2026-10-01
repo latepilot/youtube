@@ -1524,6 +1524,14 @@ function initUI() {
   detectStudio();
 }
 
+const PAGE = 'viz.html';
+// открыто с диска (file://), а студия запущена — переходим в неё, там работает рендер
+if (location.protocol === 'file:' && !navigator.webdriver) (async () => {
+  for (let port = 8420; port < 8425; port++) {
+    try { await fetch(`http://127.0.0.1:${port}/api/ping`, { mode: 'no-cors' }); location.href = `http://127.0.0.1:${port}/${PAGE}`; return; } catch { }
+  }
+})();
+
 if (RENDER_MODE) document.body.classList.add('render');
 else initUI();
 </script>
