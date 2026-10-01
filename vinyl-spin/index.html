@@ -20,6 +20,10 @@
   header { display: flex; align-items: baseline; gap: 12px; }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
   header span { color: var(--muted); }
+  header nav { display: flex; gap: 4px; }
+  header nav a, header nav b { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-weight: 500; }
+  header nav b { color: #111; background: var(--accent); border-color: var(--accent); }
+  header nav a:hover { color: var(--text); border-color: #4a5058; }
   #viewport { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; border-radius: var(--r); overflow: hidden; position: relative; }
   #viewport canvas { max-width: 100%; max-height: 100%; aspect-ratio: 16 / 9; display: block; }
   #dropHint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(127,224,74,.15); border: 2px dashed var(--accent); border-radius: var(--r); font-size: 18px; pointer-events: none; }
@@ -69,7 +73,7 @@
 <body>
 <div id="app">
   <section id="stage">
-    <header><h1>vinyl-spin</h1><span>фон + диск + логотип, зум на всю длину, плёночное зерно</span></header>
+    <header><h1>vinyl-spin</h1><nav><b>Пластинка</b><a href="viz.html">Визуализация трека</a></nav><span>фон + диск + логотип, зум на всю длину, плёночное зерно</span></header>
     <div id="viewport"><canvas id="cv" width="1920" height="1080"></canvas><div id="dropHint">Брось файл на нужное поле справа</div></div>
     <div id="transport">
       <button id="bStart" title="В начало (Home)">⏮</button>

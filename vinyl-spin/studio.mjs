@@ -60,9 +60,9 @@ async function handle(req, res) {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
 
-  if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
+  if (req.method === 'GET' && (p === '/' || p === '/index.html' || p === '/viz.html')) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    fs.createReadStream(path.join(HERE, 'index.html')).pipe(res); return;
+    fs.createReadStream(path.join(HERE, p === '/viz.html' ? 'viz.html' : 'index.html')).pipe(res); return;
   }
   if (req.method === 'GET' && p === '/api/ping') return json(res, 200, { ok: true, ffmpeg: ffver, platform: process.platform, outDir: OUT_DIR });
 

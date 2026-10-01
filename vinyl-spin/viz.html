@@ -1,0 +1,1560 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vinyl-spin · визуализация</title>
+<style>
+  :root {
+    --bg: #111214; --panel: #1a1c1f; --panel2: #222529; --line: #2e3237;
+    --text: #e6e6e6; --muted: #8b9199; --accent: #7fe04a; --warn: #ffb347; --err: #ff6b6b;
+    --r: 8px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-size: 13px; }
+  body.render { background: #000; overflow: hidden; }
+  body.render #app { display: none; }
+  body.render #cv { position: fixed; left: 0; top: 0; width: auto; height: auto; }
+  #app { display: grid; grid-template-columns: 1fr 360px; height: 100vh; }
+  #stage { display: flex; flex-direction: column; min-width: 0; padding: 14px; gap: 8px; }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+  header nav { display: flex; gap: 4px; }
+  header nav a, header nav b { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-weight: 500; }
+  header nav b { color: #111; background: var(--accent); border-color: var(--accent); }
+  header nav a:hover { color: var(--text); border-color: #4a5058; }
+  header span { color: var(--muted); }
+  #viewport { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; border-radius: var(--r); overflow: hidden; position: relative; }
+  #viewport canvas { max-width: 100%; max-height: 100%; aspect-ratio: 16 / 9; display: block; }
+  #viewport .hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); font-size: 15px; line-height: 1.6; pointer-events: none; padding: 20px; }
+  #viewport .hint[hidden] { display: none; }
+  #dropHint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(127,224,74,.15); border: 2px dashed var(--accent); border-radius: var(--r); font-size: 18px; pointer-events: none; }
+  body.dragging #dropHint { display: flex; }
+  #tl { position: relative; height: 118px; flex: none; border-radius: 6px; overflow: hidden; background: #0c0d0f; border: 1px solid var(--line); cursor: pointer; }
+  #tl canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  #transport { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  #transport input[type=range] { flex: 1; min-width: 200px; }
+  #time { font-variant-numeric: tabular-nums; min-width: 190px; text-align: center; color: var(--muted); }
+  #time b { color: var(--text); font-weight: 500; }
+  #status { color: var(--muted); font-variant-numeric: tabular-nums; display: flex; gap: 16px; flex-wrap: wrap; }
+  button, .btn { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+  button:hover, .btn:hover { border-color: #4a5058; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+  #panel { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 10px 12px 40px; }
+  details { border-bottom: 1px solid var(--line); padding: 6px 0 10px; }
+  summary { cursor: pointer; font-weight: 600; padding: 4px 0; list-style: none; user-select: none; }
+  summary::before { content: "▸ "; color: var(--muted); }
+  details[open] summary::before { content: "▾ "; }
+  .row { display: grid; grid-template-columns: 1fr 74px; gap: 4px 8px; align-items: center; margin: 7px 0 2px; }
+  .row label { grid-column: 1 / -1; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+  .row label i { font-style: normal; color: #5d636b; cursor: pointer; }
+  .row label i:hover { color: var(--text); }
+  .row.wide { grid-template-columns: 1fr; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=number], select, input[type=text] { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; font: inherit; }
+  input[type=color] { width: 100%; height: 26px; background: none; border: 1px solid var(--line); border-radius: 5px; padding: 1px; }
+  .check { display: flex; gap: 8px; align-items: center; margin: 8px 0 2px; color: var(--muted); font-size: 12px; }
+  .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+  .drop { position: relative; border: 1px dashed #3c4148; border-radius: var(--r); padding: 8px; min-height: 84px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: var(--panel2) center / cover no-repeat; overflow: hidden; }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop b { font-size: 12px; text-shadow: 0 1px 3px #000; }
+  .drop small { color: #c9ced4; font-size: 11px; word-break: break-all; text-shadow: 0 1px 3px #000; margin-top: auto; }
+  .drop .x { position: absolute; right: 4px; top: 4px; padding: 0 6px; display: none; }
+  .drop.has .x { display: block; }
+  .drop input { display: none; }
+  .note { color: var(--muted); font-size: 11.5px; line-height: 1.45; margin: 6px 0; }
+  .note.warn { color: var(--warn); }
+  .note.ok { color: var(--accent); }
+  #anStatus { white-space: pre-line; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  progress { width: 100%; height: 10px; accent-color: var(--accent); margin-top: 8px; }
+  #rStatus { white-space: pre-line; }
+  pre#rReport { white-space: pre-wrap; background: #0c0d0f; border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: 11px ui-monospace, Menlo, monospace; color: #cfe; margin: 6px 0 0; }
+  body.exporting #controls, body.exporting .drops, body.exporting #transport, body.exporting #tl { pointer-events: none; opacity: .45; }
+  @media (max-width: 900px) { #app { grid-template-columns: 1fr; height: auto; } #viewport { min-height: 40vh; } #panel { border-left: 0; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="stage">
+    <header>
+      <h1>vinyl-spin</h1>
+      <nav><a href="index.html">Пластинка</a><b>Визуализация трека</b></nav>
+      <span>картинка слушает трек: кик, хэты, аккорды, брейки и дропы</span>
+    </header>
+    <div id="viewport"><canvas id="cv" width="1920" height="1080"></canvas><div class="hint" id="vpHint">Перетащи трек (WAV, AIFF, FLAC или MP3) на поле «Трек» справа.<br>Анализ займёт несколько секунд, потом картинку можно смотреть и рендерить.</div><div id="dropHint">Брось файл на нужное поле справа</div></div>
+    <div id="tl" title="Карта трека: секции, громкость полос, удары. Клик — перейти."><canvas id="tlBase"></canvas><canvas id="tlTop"></canvas></div>
+    <div id="transport">
+      <button id="bStart" title="В начало (Home)">⏮</button>
+      <button id="bBack" title="−10 с (Shift+←)">−10с</button>
+      <button id="bPrevF" title="−1 кадр (←)">−1к</button>
+      <button id="bPlay" class="primary" title="Пуск/пауза (пробел)">▶</button>
+      <button id="bNextF" title="+1 кадр (→)">+1к</button>
+      <button id="bFwd" title="+10 с (Shift+→)">+10с</button>
+      <button id="bNextSec" title="К следующей секции (Page Down)">⇥ секция</button>
+      <input id="seekbar" type="range" min="0" max="1" step="0.000001" value="0">
+      <span id="time"></span>
+      <label class="check" title="Превью в половинном разрешении, если не хватает скорости. PNG и рендер всегда в полном."><input type="checkbox" id="halfRes"> превью ½</label>
+    </div>
+    <div id="status"><span id="stFps"></span><span id="stBeat"></span><span id="stSec"></span><span id="stGpu"></span></div>
+  </section>
+
+  <aside id="panel">
+    <details open><summary>Трек</summary>
+      <div class="drops">
+        <label class="drop" data-kind="audio"><b>Трек</b><small>WAV / AIFF / FLAC / MP3</small><button class="x" title="Убрать">×</button><input type="file" accept="audio/*,.flac,.aif,.aiff,.wav"></label>
+        <label class="drop" data-kind="logo"><b>Логотип</b><small>стандартный · перетащи свой</small><button class="x" title="Убрать">×</button><input type="file" accept="image/*"></label>
+      </div>
+      <p class="note" id="anStatus">Трек не загружен.</p>
+      <progress id="anBar" max="1" value="0" hidden></progress>
+    </details>
+    <details open id="renderBox"><summary>Рендер ролика</summary>
+      <div id="rNoStudio" class="note warn">Чтобы рендерить кнопкой, открой редактор двойным кликом по <b>vinyl-spin.command</b> и перейди на вкладку «Визуализация трека». Сейчас файл открыт напрямую, отсюда работают превью, PNG и пресеты.</div>
+      <div id="rStudio" hidden>
+        <div class="row wide"><label>Что рендерить</label><select id="rRange"><option value="all">весь трек</option><option value="head">первые 20 с (проверка)</option><option value="here">20 с от курсора</option></select></div>
+        <div class="btns"><button id="bRender" class="primary">Рендер ролика</button><button id="bCancel" hidden>Отменить</button></div>
+        <progress id="rBar" max="1" value="0" hidden></progress>
+        <p class="note" id="rStatus"></p>
+        <pre id="rReport" hidden></pre>
+        <div class="btns"><button id="bReveal" hidden>Показать в Finder</button></div>
+        <p class="note" id="rWhere"></p>
+      </div>
+    </details>
+    <div id="controls"></div>
+    <details><summary>Кадр, пресеты</summary>
+      <div class="btns">
+        <button id="bPng" class="primary">PNG кадра</button>
+        <button id="bSave">Сохранить пресет</button>
+        <label class="btn">Загрузить пресет<input id="presetIn" type="file" accept=".json,application/json" hidden></label>
+        <button id="bReset">Сбросить</button>
+      </div>
+      <p class="note">Пресет хранит все параметры и карту трека (удары и секции), так что ролик потом получится тем же.</p>
+    </details>
+  </aside>
+</div>
+
+<script>
+'use strict';
+/* ==========================================================================
+   Параметры. Размеры в долях высоты кадра H (не зависят от разрешения).
+   ========================================================================== */
+const PALETTES = {
+  coal:  { paper: '#121315', ink: '#e9e5da', ink2: '#5aa0c8' },  // уголь: светлая краска на тёмной бумаге
+  paper: { paper: '#e9e5dc', ink: '#17181a', ink2: '#2f5f9e' },  // бумага: тёмная краска на светлой
+  dub:   { paper: '#07121a', ink: '#a8c7d6', ink2: '#e9e5da' },  // даб-синий
+  riso:  { paper: '#ece6da', ink: '#1d3f8c', ink2: '#e2574c' },  // ризограф: синий + красный
+};
+const VDEF = Object.freeze({
+  res: '1920x1080', fps: 25,
+  scenes: 'auto', seed: 1, speed: 1,
+  palette: 'coal', paper: '#121315', ink: '#e9e5da', ink2: '#5aa0c8', ink2Amt: 0.9,
+  halftone: true, cell: 7, angle: 45, misreg: 1.2, grain: 0.04,
+  kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1, fog: 1,
+  syncMs: 0, bpmFix: 0, gridShiftMs: 0,
+  overlay: true, marks: true, artist: 'PROSTYE TONA', title: '',
+  logoMode: 'default', logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
+  bitrate: 25, gopSec: 0.5,
+});
+const SCHEMA = [
+  { title: 'Кадр', open: false, items: [
+    { key: 'res', label: 'Разрешение', type: 'select', options: [['1920x1080', '1920×1080 (1080p)'], ['2560x1440', '2560×1440 (1440p)'], ['3840x2160', '3840×2160 (4K)'], ['1280x720', '1280×720']] },
+    { key: 'fps', label: 'Кадров в секунду', type: 'select', num: true, options: [[24, '24'], [25, '25'], [30, '30'], [50, '50'], [60, '60']] },
+  ]},
+  { title: 'Тема: даб-техно', open: true, items: [
+    { key: 'scenes', label: 'Сцены', type: 'select', options: [['auto', 'по секциям: грув — туннель, брейк — море'], ['tunnel', 'только туннель колец'], ['sea', 'только точечное море']] },
+    { key: 'seed', label: 'Вариант (seed)', min: 1, max: 999, step: 1 },
+    { key: 'speed', label: 'Скорость камеры', min: 0, max: 3, step: 0.01 },
+    { key: 'fog', label: 'Туман', min: 0, max: 3, step: 0.01 },
+  ]},
+  { title: 'Реакция на трек', open: true, items: [
+    { key: 'kickAmt', label: 'Кик: волна и толчок', min: 0, max: 2, step: 0.01 },
+    { key: 'stabAmt', label: 'Аккорды и эхо: дуги, круги', min: 0, max: 2, step: 0.01 },
+    { key: 'hatAmt', label: 'Хэты: искры', min: 0, max: 2, step: 0.01 },
+    { key: 'flashAmt', label: 'Дроп: вспышка', min: 0, max: 2, step: 0.01 },
+    { key: 'syncMs', label: 'Сдвиг картинки, мс (минус — раньше звука)', min: -200, max: 200, step: 1 },
+  ]},
+  { title: 'Печать', open: true, items: [
+    { key: 'palette', label: 'Палитра', type: 'select', options: [['coal', 'уголь'], ['paper', 'бумага'], ['dub', 'даб-синий'], ['riso', 'ризограф'], ['custom', 'свои цвета']] },
+    { key: 'paper', label: 'Бумага', type: 'color' },
+    { key: 'ink', label: 'Краска', type: 'color' },
+    { key: 'ink2', label: 'Второй цвет (события)', type: 'color' },
+    { key: 'ink2Amt', label: 'Второй цвет, сила', min: 0, max: 1, step: 0.01 },
+    { key: 'halftone', label: 'Полутоновый растр', type: 'check' },
+    { key: 'cell', label: 'Растр: шаг, px при 1080p', min: 3, max: 24, step: 0.1 },
+    { key: 'angle', label: 'Растр: угол, °', min: 0, max: 90, step: 0.5 },
+    { key: 'misreg', label: 'Сдвиг второго цвета, px', min: 0, max: 8, step: 0.1 },
+    { key: 'grain', label: 'Зерно', min: 0, max: 0.2, step: 0.001 },
+  ]},
+  { title: 'Подписи', open: false, items: [
+    { key: 'overlay', label: 'Подписи и данные трека', type: 'check' },
+    { key: 'marks', label: 'Пометки «от руки» на дропах', type: 'check' },
+    { key: 'artist', label: 'Исполнитель', type: 'text' },
+    { key: 'title', label: 'Название (пусто — имя файла)', type: 'text' },
+  ]},
+  { title: 'Логотип', open: false, items: [
+    { key: 'logoMode', label: 'Какой логотип', type: 'select', options: [['default', 'стандартный (KËNIG FLOW)'], ['file', 'свой файл'], ['none', 'без логотипа']] },
+    { key: 'logoSize', label: 'Высота, % высоты кадра', min: 0.02, max: 0.4, step: 0.001, k: 100 },
+    { key: 'logoRight', label: 'Отступ справа, % высоты', min: 0, max: 0.3, step: 0.001, k: 100 },
+    { key: 'logoBottom', label: 'Отступ снизу, % высоты', min: 0, max: 0.3, step: 0.001, k: 100 },
+    { key: 'logoOpacity', label: 'Непрозрачность', min: 0, max: 1, step: 0.01, k: 100 },
+  ]},
+  { title: 'Сетка и видео', open: false, items: [
+    { key: 'bpmFix', label: 'Темп вручную, BPM (0 — как нашёл анализ)', min: 0, max: 200, step: 0.01 },
+    { key: 'gridShiftMs', label: 'Сдвиг сетки долей, мс', min: -250, max: 250, step: 1 },
+    { key: 'bitrate', label: 'Битрейт, Мбит/с', min: 4, max: 120, step: 1 },
+    { key: 'gopSec', label: 'Ключевой кадр каждые, с', min: 0.1, max: 10, step: 0.1 },
+  ]},
+];
+
+/* ==========================================================================
+   Анализ трека. Всё детерминированно: один файл → одна и та же карта.
+   Полосы фильтруются во времени (биквады), огибающая 1 мс, атаки — по скачку уровня за 10 мс.
+   ========================================================================== */
+const AN = { SR: 24000, RATE: 1000, MAP: 100 };
+const yieldUI = () => new Promise(r => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
+
+async function decodeAudio(arrayBuffer) {
+  const ctx = new OfflineAudioContext(1, 1, AN.SR);
+  const ab = await ctx.decodeAudioData(arrayBuffer.slice(0));
+  const n = ab.length, ch = ab.numberOfChannels, x = new Float32Array(n);
+  for (let c = 0; c < ch; c++) { const d = ab.getChannelData(c); for (let i = 0; i < n; i++) x[i] += d[i] / ch; }
+  return { x, sr: ab.sampleRate, duration: n / ab.sampleRate };
+}
+// биквад RBJ: [b0, b1, b2, a1, a2]
+function rbj(type, f0, Q, sr) {
+  const w = 2 * Math.PI * f0 / sr, c = Math.cos(w), al = Math.sin(w) / (2 * Q), a0 = 1 + al;
+  const b = type === 'lp' ? [(1 - c) / 2, 1 - c, (1 - c) / 2] : [(1 + c) / 2, -(1 + c), (1 + c) / 2];
+  return [b[0] / a0, b[1] / a0, b[2] / a0, -2 * c / a0, (1 - al) / a0];
+}
+// средняя мощность полосы за каждую миллисекунду
+function bandPower(x, sr, stages) {
+  const step = Math.round(sr / AN.RATE), n = Math.floor(x.length / step), out = new Float32Array(n);
+  const ns = stages.length, c = new Float64Array(ns * 5), z = new Float64Array(ns * 4);
+  stages.forEach((s, k) => c.set(s, k * 5));
+  let acc = 0, cnt = 0, m = 0;
+  for (let i = 0, end = n * step; i < end; i++) {
+    let v = x[i];
+    for (let k = 0; k < ns; k++) {
+      const o = k * 5, q = k * 4;
+      let y = c[o] * v + c[o + 1] * z[q] + c[o + 2] * z[q + 1] - c[o + 3] * z[q + 2] - c[o + 4] * z[q + 3];
+      if (y < 1e-30 && y > -1e-30) y = 0; // без денормалей
+      z[q + 1] = z[q]; z[q] = v; z[q + 3] = z[q + 2]; z[q + 2] = y; v = y;
+    }
+    acc += v * v;
+    if (++cnt === step) { out[m++] = acc / step; acc = 0; cnt = 0; }
+  }
+  return out;
+}
+// центрированное скользящее среднее мощности → дБ
+function levelDb(P, win) {
+  const n = P.length, S = new Float64Array(n + 1), out = new Float32Array(n), h = win >> 1;
+  for (let i = 0; i < n; i++) S[i + 1] = S[i] + P[i];
+  for (let i = 0; i < n; i++) { const a = Math.max(0, i - h), b = Math.min(n, i + h + 1); out[i] = 10 * Math.log10((S[b] - S[a]) / (b - a) + 1e-12); }
+  return out;
+}
+function percentile(arr, q, stride = 1) {
+  const m = Math.ceil(arr.length / stride), a = new Float32Array(m);
+  for (let i = 0; i < m; i++) a[i] = arr[i * stride];
+  a.sort(); return a.length ? a[Math.min(a.length - 1, Math.max(0, Math.floor(q * (a.length - 1))))] : 0;
+}
+// пики функции атак: локальный максимум ±radius и выше порога mean + k·std в окне ±win
+function pickPeaks(odf, { radius, minRise, k, win }) {
+  const n = odf.length, S1 = new Float64Array(n + 1), S2 = new Float64Array(n + 1), peaks = [];
+  for (let i = 0; i < n; i++) { S1[i + 1] = S1[i] + odf[i]; S2[i + 1] = S2[i] + odf[i] * odf[i]; }
+  for (let i = radius; i < n - radius; i++) {
+    const v = odf[i];
+    if (v < minRise) continue;
+    let ok = true;
+    for (let j = i - radius; j <= i + radius; j++) { if (odf[j] > v || (j < i && odf[j] === v)) { ok = false; break; } }
+    if (!ok) continue;
+    const a = Math.max(0, i - win), b = Math.min(n, i + win), cnt = b - a;
+    const mean = (S1[b] - S1[a]) / cnt, sd = Math.sqrt(Math.max(0, (S2[b] - S2[a]) / cnt - mean * mean));
+    if (v > mean + k * sd) peaks.push(i);
+  }
+  return peaks;
+}
+// события полосы: [время, сила 0..1]. Сила — насколько удар поднял амплитуду полосы (в долях опорной),
+// а не скачок в дБ: басовая нота аккорда на фоне саба даёт заметный скачок в дБ, но почти не добавляет энергии
+function bandEvents(peaks, L, ref, offsetMs) {
+  const amp = (db) => Math.pow(10, db / 20), aRef = amp(ref);
+  const ev = peaks.map(i => {
+    let pb = 0, nb = 0; for (let j = Math.max(0, i - 30); j < i - 6; j++) { pb += Math.pow(10, L[j] / 10); nb++; }
+    let la = -300; for (let j = i, e = Math.min(L.length, i + 40); j < e; j++) if (L[j] > la) la = L[j];
+    return [Math.max(0, (i + offsetMs) / 1000), Math.max(0, amp(la) - Math.sqrt(nb ? pb / nb : 0)) / aRef];
+  });
+  // нормировка внутри полосы: типичный сильный удар (90-й перцентиль) = 1
+  const p90 = percentile(ev.map(e => e[1]), 0.9) || 1;
+  for (const e of ev) e[1] = +Math.min(1, e[1] / p90).toFixed(3);
+  return ev;
+}
+
+// Темп и фаза. 1) автокорреляция ударов в низах даёт грубый темп; 2) точный темп — по круговой статистике:
+// каждый удар — вектор с углом 2π·t/P; удары на долях складываются, синкопы и эхо (½, ¾ доли) гасят друг друга;
+// 3) регрессия t ≈ t0 + k·P по ударам, попавшим в доли.
+function estimateGrid(lowEv, duration) {
+  const strong = lowEv.filter(e => e[1] >= 0.35);
+  if (strong.length < 16) return null;
+  const n = Math.ceil(duration * AN.MAP) + 2, x = new Float32Array(n);
+  for (const [t, s] of strong) { const i = Math.round(t * AN.MAP); x[i] += s; if (i > 0) x[i - 1] += s * 0.5; if (i + 1 < n) x[i + 1] += s * 0.5; }
+  const ac = new Float64Array(122);
+  for (let lag = 30; lag <= 121; lag++) { let s = 0; for (let i = 0; i + lag < n; i++) s += x[i] * x[i + lag]; ac[lag] = s / (n - lag); }
+  let best = 0, bestLag = 0;
+  for (let lag = 33; lag <= 100; lag++) { // 60…180 BPM, чаще всего даб-техно около 120
+    const bpm = 6000 / lag, prior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 122) / 0.45, 2));
+    const sc = ac[lag] * prior; if (sc > best) { best = sc; bestLag = lag; }
+  }
+  if (!bestLag) return null;
+  const T = strong.map(e => e[0]), S = strong.map(e => e[1]);
+  const resultant = (P) => { let re = 0, im = 0, w = 0; for (let i = 0; i < T.length; i++) { const a = 2 * Math.PI * T[i] / P; re += S[i] * Math.cos(a); im += S[i] * Math.sin(a); w += S[i]; } return { r: Math.hypot(re, im) / w, ph: Math.atan2(im, re) }; };
+  const P0 = bestLag / AN.MAP, span = duration;
+  const stepP = P0 * P0 / (6 * span);                       // шаг поиска меньше ширины пика
+  let bp = P0, br = -1;
+  for (let P = P0 * 0.975; P <= P0 * 1.025; P += stepP) { const { r } = resultant(P); if (r > br) { br = r; bp = P; } }
+  // уточнение золотым сечением в окрестности
+  let lo = bp - stepP, hi = bp + stepP;
+  for (let it = 0; it < 40; it++) { const m1 = hi - (hi - lo) / 1.618, m2 = lo + (hi - lo) / 1.618; if (resultant(m1).r > resultant(m2).r) hi = m2; else lo = m1; }
+  let P = (lo + hi) / 2;
+  // фаза — мода гистограммы (64 корзины на долю): кики на каждой доле дают самый высокий пик,
+  // а среднее по кругу утянули бы удары на ½ и ¾ доли (басовые ноты аккордов и их эхо)
+  const NB = 64, hist = new Float64Array(NB);
+  for (let i = 0; i < T.length; i++) { const f = ((T[i] / P) % 1 + 1) % 1; hist[Math.floor(f * NB) % NB] += S[i] * S[i]; }
+  let bb = 0, bv = -1;
+  for (let k = 0; k < NB; k++) { const v = hist[(k + NB - 1) % NB] * 0.5 + hist[k] + hist[(k + 1) % NB] * 0.5; if (v > bv) { bv = v; bb = k; } }
+  let t0 = (bb + 0.5) / NB * P;
+  // регрессия по ударам, попавшим в доли (±8 % доли)
+  let used = 0;
+  for (let it = 0; it < 3; it++) {
+    let sk = 0, st = 0, skk = 0, skt = 0; used = 0;
+    for (const t of T) {
+      const k = Math.round((t - t0) / P), r = t - (t0 + k * P);
+      if (Math.abs(r) > P * 0.08) continue;
+      sk += k; st += t; skk += k * k; skt += k * t; used++;
+    }
+    const d = used * skk - sk * sk;
+    if (used < 8 || d === 0) break;
+    P = (used * skt - sk * st) / d; t0 = (st - P * sk) / used;
+  }
+  const beat0 = t0 - Math.floor(t0 / P) * P;
+  return { beatLen: P, beat0, bpm: 60 / P, conf: used / strong.length, r: br };
+}
+
+async function analyzeTrack(arrayBuffer, onProgress = () => { }) {
+  onProgress(0.03, 'Декодирую звук…'); await yieldUI();
+  const { x, sr, duration } = await decodeAudio(arrayBuffer);
+  const BANDS = {
+    low: [rbj('hp', 30, 0.707, sr), rbj('lp', 150, 0.707, sr), rbj('lp', 150, 0.707, sr)],
+    mid: [rbj('hp', 300, 0.707, sr), rbj('hp', 300, 0.707, sr), rbj('lp', 2500, 0.707, sr)],
+    high: [rbj('hp', 6000, 0.707, sr), rbj('hp', 6000, 0.707, sr)],
+    full: [rbj('hp', 25, 0.707, sr)],
+  };
+  const SMOOTH = { low: 12, mid: 8, high: 4, full: 10 };       // сглаживание огибающей, мс
+  const PEAK = {                                                // поиск атак
+    low: { radius: 70, minRise: 5, k: 2.0, win: 1500 },
+    mid: { radius: 60, minRise: 4, k: 2.0, win: 1500 },
+    high: { radius: 35, minRise: 4, k: 1.5, win: 1500 },
+  };
+  const OFFSET = { low: -3, mid: -2, high: -1 };               // поправка момента атаки, мс (по эталону)
+  const SPAN = { low: 5, mid: 5, high: 3 };                     // подъём уровня меряем за 2·SPAN мс
+  const lev = {}, ev = {}, refs = {};
+  let step = 0;
+  for (const name of ['low', 'mid', 'high', 'full']) {
+    onProgress(0.08 + 0.2 * step++, 'Слушаю полосу: ' + { low: 'низ', mid: 'середина', high: 'верх', full: 'вся' }[name] + '…'); await yieldUI();
+    const L = levelDb(bandPower(x, sr, BANDS[name]), SMOOTH[name]);
+    lev[name] = L; refs[name] = percentile(L, 0.95, 7);
+    if (name === 'full') break;
+    const floor = refs[name] - 30, n = L.length, odf = new Float32Array(n), h = SPAN[name];
+    for (let i = h; i < n - h; i++) { const a = Math.max(L[i - h], floor), b = Math.max(L[i + h], floor); odf[i] = b > a ? b - a : 0; }
+    let peaks = pickPeaks(odf, PEAK[name]);
+    // аккорд звучит: через 45 мс уровень ещё не упал больше чем на 10 дБ (щелчок кика гаснет за миллисекунды)
+    if (name === 'mid') peaks = peaks.filter(i => { let pk = -300; for (let j = i; j < Math.min(n, i + 12); j++) pk = Math.max(pk, L[j]); return i + 45 < n && L[i + 45] > pk - 10; });
+    // хэт звенит 20–60 мс, щелчок кика в верхах гаснет за пару миллисекунд
+    if (name === 'high') peaks = peaks.filter(i => { let pk = -300; for (let j = i; j < Math.min(n, i + 6); j++) pk = Math.max(pk, L[j]); return i + 12 < n && L[i + 12] > pk - 14; });
+    ev[name] = bandEvents(peaks, L, refs[name], OFFSET[name]);
+    if (window.__vzDebug) window.__vzDebug[name] = { L, odf, ref: refs[name] };
+  }
+  onProgress(0.9, 'Ищу темп, такты и секции…'); await yieldUI();
+  const lowL = lev.low, lowRef = refs.low;
+  // слабые удары в середине и верху, совпавшие с сильным ударом в низах, — это призвуки кика
+  const kickT = ev.low.filter(e => e[1] >= 0.5).map(e => e[0]);
+  const nearKick = (t) => { const i = upper(kickT, t); return (i > 0 && t - kickT[i - 1] < 0.02) || (i < kickT.length && kickT[i] - t < 0.02); };
+  ev.mid = ev.mid.filter(e => e[1] >= 0.35 || !nearKick(e[0]));
+  ev.high = ev.high.filter(e => e[1] >= 0.35 || !nearKick(e[0]));
+  if (window.__vzDebug) window.__vzDebug.ev = ev;
+  return buildMap({ duration, lev, refs, ev, lowL, lowRef });
+}
+
+// Огибающие для картинки: 100 Гц, 0..1 (уровень относительно 97-го перцентиля, диапазон 40 дБ)
+function envelope100(L, ref) {
+  const n = Math.floor(L.length / 10), out = new Uint8Array(n), lo = ref - 40;
+  for (let i = 0; i < n; i++) {
+    let p = 0; for (let j = 0; j < 10; j++) p += Math.pow(10, L[i * 10 + j] / 10);
+    const db = 10 * Math.log10(p / 10 + 1e-12);
+    out[i] = Math.round(255 * Math.min(1, Math.max(0, (db - lo) / 40)));
+  }
+  return out;
+}
+
+// Кики по сетке: на каждой доле смотрим, добавил ли низ энергии. Порог «есть / нет» — по Оцу на всех долях трека
+// (доли с киком и без образуют две группы). Так находятся и мягкие кики без щелчка, которые общий поиск пропускает.
+function kicksOnGrid(grid, L, ref, duration) {
+  const amp = (db) => Math.pow(10, db / 20), aRef = amp(ref), n = L.length, out = [];
+  for (let k = Math.ceil(-grid.beat0 / grid.beatLen); ; k++) {
+    const tb = grid.beat0 + k * grid.beatLen; if (tb > duration - 0.05) break;
+    const c = Math.round(tb * 1000); let best = -1, bi = c;
+    for (let i = Math.max(10, c - 40); i <= Math.min(n - 11, c + 40); i++) { const r = L[i + 10] - L[i - 10]; if (r > best) { best = r; bi = i; } }
+    let pb = 0, nb = 0; for (let j = Math.max(0, bi - 60); j < bi - 15; j++) { pb += Math.pow(10, L[j] / 10); nb++; }
+    let la = -300; for (let j = bi; j < Math.min(n, bi + 60); j++) if (L[j] > la) la = L[j];
+    out.push({ t: bi / 1000, rise: best, gain: Math.max(0, amp(la) - Math.sqrt(nb ? pb / nb : 0)) / aRef });
+  }
+  if (out.length < 8) return [];
+  // Оцу по усилению
+  const v = out.map(o => o.gain).sort((a, b) => a - b), N = v.length, S = v.reduce((a, b) => a + b, 0);
+  let bestT = Infinity, bestVar = -1, s1 = 0;
+  for (let i = 0; i < N - 1; i++) {
+    s1 += v[i]; const w1 = (i + 1) / N, m1 = s1 / (i + 1), m2 = (S - s1) / (N - i - 1), bv = w1 * (1 - w1) * (m1 - m2) ** 2;
+    if (bv > bestVar && m2 > 2.5 * Math.max(m1, 0.02)) { bestVar = bv; bestT = (v[i] + v[i + 1]) / 2; }
+  }
+  if (!isFinite(bestT)) bestT = v[Math.floor(N / 2)] > 0.25 ? 0.4 * v[Math.floor(N / 2)] : Infinity; // на всех долях кик или нигде
+  const kicks = out.filter(o => o.gain >= bestT && o.rise >= 2.5);
+  const p90 = percentile(kicks.map(o => o.gain), 0.9) || 1;
+  return kicks.map(o => [Math.max(0, o.t - 0.003), +Math.min(1, o.gain / p90).toFixed(3)]);
+}
+
+function buildMap({ duration, lev, refs, ev, lowL, lowRef }) {
+  const env = {}; for (const k of ['low', 'mid', 'high', 'full']) env[k] = envelope100(lev[k], percentile(lev[k], 0.97, 7));
+  const grid = estimateGrid(ev.low, duration);
+  const map = { version: 1, duration: +duration.toFixed(4), env, hats: ev.high, stabs: ev.mid, kicks: [], bass: [], sections: [] };
+  if (grid) {
+    Object.assign(map, { bpm: +grid.bpm.toFixed(4), beatLen: grid.beatLen, beat0: grid.beat0, gridConf: +grid.conf.toFixed(3) });
+    // кики — по сетке; остальные удары в низах — бас
+    map.kicks = kicksOnGrid(grid, lowL, lowRef, duration);
+    const kt = map.kicks.map(e => e[0]);
+    for (const e of ev.low) { const i = upper(kt, e[0]); const near = (i > 0 && e[0] - kt[i - 1] < 0.06) || (i < kt.length && kt[i] - e[0] < 0.06); if (!near) map.bass.push(e); }
+  } else {
+    // без сетки (эмбиент): условный «такт» 8 с
+    Object.assign(map, { bpm: 0, beatLen: 2, beat0: 0, gridConf: 0 });
+    map.bass = ev.low;
+  }
+  map.barPhase = grid ? findBarPhase(map) : 0;
+  map.sections = findSections(map);
+  return map;
+}
+
+// Какая доля такта первая: первый кик после паузы (и первый кик трека) почти всегда на сильной доле.
+// Верхние удары не учитываем: клэп на 2 и 4 уводил бы фазу.
+function findBarPhase(map) {
+  const P = map.beatLen, score = [0, 0, 0, 0];
+  const beatIdx = (t) => Math.round((t - map.beat0) / P);
+  const ks = map.kicks.filter(e => e[1] >= 0.3);
+  ks.forEach((e, i) => {
+    const gap = i === 0 ? Infinity : e[0] - ks[i - 1][0];
+    if (gap > 7.5 * P) score[((beatIdx(e[0]) % 4) + 4) % 4] += i === 0 ? 2 : 3;
+  });
+  let best = 0; for (let i = 1; i < 4; i++) if (score[i] > score[best]) best = i;
+  return best;
+}
+
+// Секции по тактам: где есть кик, где нет, плюс резкие изменения громкости полос
+function findSections(map) {
+  const P = map.beatLen, bar = 4 * P, b0 = map.beat0 + map.barPhase * P - Math.ceil((map.beat0 + map.barPhase * P) / bar) * bar;
+  const nb = Math.ceil((map.duration - b0) / bar);
+  const tb = (j) => b0 + j * bar;
+  const envMean = (arr, a, b) => { const i0 = Math.max(0, Math.floor(a * AN.MAP)), i1 = Math.min(arr.length, Math.ceil(b * AN.MAP)); let s = 0; for (let i = i0; i < i1; i++) s += arr[i]; return i1 > i0 ? s / (i1 - i0) / 255 : 0; };
+  const count = (evs, a, b, smin) => { let c = 0; for (const e of evs) if (e[0] >= a && e[0] < b && e[1] >= smin) c++; return c; };
+  const F = [];
+  for (let j = 0; j < nb; j++) {
+    const a = tb(j), b = a + bar;
+    F.push({ kick: map.gridConf ? Math.min(1, count(map.kicks, a, b, 0.25) / 4) : 0, low: envMean(map.env.low, a, b), mid: envMean(map.env.mid, a, b), high: envMean(map.env.high, a, b),
+      full: envMean(map.env.full, a, b), hat: Math.min(1, count(map.hats, a, b, 0.2) / 8), stab: Math.min(1, count(map.stabs, a, b, 0.2) / 4) });
+  }
+  // 1) кик есть / нет; короткие куски (<2 тактов) не считаем
+  const on = F.map(f => f.kick >= 0.5);
+  const runs = []; on.forEach((v, j) => { if (!runs.length || runs[runs.length - 1].v !== v) runs.push({ v, a: j, b: j + 1 }); else runs[runs.length - 1].b = j + 1; });
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 0; i < runs.length; i++) if (runs[i].b - runs[i].a < 2 && runs.length > 1) {
+      const prev = runs[i - 1], next = runs[i + 1];
+      if (prev) { prev.b = runs[i].b; if (next && next.v === prev.v) { prev.b = next.b; runs.splice(i, 2); } else runs.splice(i, 1); }
+      else { next.a = runs[i].a; runs.splice(i, 1); }
+      changed = true; break;
+    }
+  }
+  const bounds = new Map(); // такт → источник
+  runs.slice(1).forEach(r => bounds.set(r.a, 'kick'));
+  // 2) новизна: разница средних признаков за 4 такта до и после
+  const keys = ['low', 'mid', 'high', 'full', 'hat', 'stab'];
+  const mu = {}, sd = {};
+  for (const k of keys) { mu[k] = F.reduce((s, f) => s + f[k], 0) / Math.max(1, nb); sd[k] = Math.max(0.03, Math.sqrt(F.reduce((s, f) => s + (f[k] - mu[k]) ** 2, 0) / Math.max(1, nb))); }
+  const W = 4, nov = new Float32Array(nb);
+  if (window.__vzDebug) window.__vzDebug.sec = { F, nov, b0, bar };
+  for (let j = 2; j < nb - 1; j++) {
+    const a0 = Math.max(0, j - W), a1 = Math.min(nb, j + W); let d2 = 0;
+    for (const k of keys) {
+      let s1 = 0, s2 = 0; for (let i = a0; i < j; i++) s1 += F[i][k]; for (let i = j; i < a1; i++) s2 += F[i][k];
+      d2 += (((s2 / (a1 - j)) - (s1 / (j - a0))) / sd[k]) ** 2;
+    }
+    nov[j] = Math.sqrt(d2 / keys.length);
+  }
+  for (let j = 2; j < nb - 1; j++) {
+    let isMax = nov[j] > 1.1; for (let i = Math.max(0, j - 4); i <= Math.min(nb - 1, j + 4) && isMax; i++) if (nov[i] > nov[j]) isMax = false;
+    if (!isMax) continue;
+    let near = false; for (const b of bounds.keys()) if (Math.abs(b - j) < 4) near = true;
+    if (near) continue;
+    const j1 = Math.max(0, Math.ceil(-b0 / bar - 0.03)), snap = j1 + Math.round((j - j1) / 4) * 4; // фразы по 4 такта от первой сильной доли
+    bounds.set(Math.abs(snap - j) <= 1 && snap > 0 && snap < nb ? snap : j, 'change');
+  }
+  // границы → секции; хвост короче 4 тактов приклеиваем к предыдущей секции
+  let starts = [0, ...[...bounds.keys()].sort((a, b) => a - b)];
+  while (starts.length > 1 && nb - starts[starts.length - 1] < 4) starts.pop();
+  const make = (st) => st.map((j, i) => {
+    const e = i + 1 < st.length ? st[i + 1] : nb, fs = F.slice(j, e);
+    const avg = (k) => fs.reduce((s, f) => s + f[k], 0) / Math.max(1, fs.length);
+    return { bar: j, t: Math.max(0, +tb(j).toFixed(4)), kick: avg('kick') >= 0.5, level: +avg('full').toFixed(3), mid: avg('mid') };
+  });
+  let secs = make(starts);
+  // вступление и концовка без кика — по одной секции, даже если внутри что-то меняется
+  const firstK = secs.findIndex(x => x.kick), lastK = secs.length - 1 - [...secs].reverse().findIndex(x => x.kick);
+  if (firstK >= 0) starts = starts.filter((j, i) => !((i > 0 && i < firstK) || (i > lastK + 1)));
+  secs = make(starts);
+  // типы и переходы
+  let groove = 0, brk = 0;
+  const fk = secs.findIndex(x => x.kick), lk = secs.length - 1 - [...secs].reverse().findIndex(x => x.kick);
+  secs.forEach((s, i) => {
+    const last = i === secs.length - 1, prev = secs[i - 1];
+    if (s.kick) s.type = (last && i > 0 && prev.kick && s.mid < prev.mid - 0.06) ? 'outro' : 'groove';
+    else s.type = fk < 0 ? (i === 0 ? 'intro' : 'break') : i < fk ? 'intro' : i > lk ? 'outro' : 'break';
+    if (s.type === 'groove') s.n = ++groove; if (s.type === 'break') s.n = ++brk;
+    s.trans = i === 0 ? 'start' : (!prev.kick && s.kick) ? 'drop' : (prev.kick && !s.kick) ? 'break' : 'shift';
+  });
+  secs.forEach(s => delete s.mid);
+  return secs;
+}
+
+/* ==========================================================================
+   Карта трека: хранение и запросы по времени
+   ========================================================================== */
+const b64u8 = { enc: (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); },
+  dec: (s) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; } };
+function mapToJSON(m) { return { ...m, env: Object.fromEntries(Object.entries(m.env).map(([k, v]) => [k, b64u8.enc(v)])) }; }
+function mapFromJSON(j) { return { ...j, env: Object.fromEntries(Object.entries(j.env).map(([k, v]) => [k, typeof v === 'string' ? b64u8.dec(v) : Uint8Array.from(v)])) }; }
+
+// Подготовленная карта: сетка с ручными правками, времена событий в Float64Array, медленные огибающие, путь камеры
+function prepareMap(raw, p) {
+  const m = { raw, duration: raw.duration };
+  m.beatLen = p.bpmFix > 0 ? 60 / p.bpmFix : raw.beatLen;
+  m.beat0 = raw.beat0 + p.gridShiftMs / 1000;
+  m.grid = raw.gridConf > 0 || p.bpmFix > 0;
+  m.barPhase = raw.barPhase;
+  const ev = (arr) => ({ t: Float64Array.from(arr, e => e[0]), s: Float32Array.from(arr, e => e[1]) });
+  m.kicks = ev(raw.kicks); m.hats = ev(raw.hats); m.stabs = ev(raw.stabs); m.bass = ev(raw.bass || []);
+  m.env = raw.env;
+  // медленная огибающая низа (τ ≈ 1,5 с) — для дыхания света
+  const slow = (u8, tau) => { const a = 1 - Math.exp(-1 / (tau * AN.MAP)), out = new Float32Array(u8.length); let y = u8[0] / 255 || 0; for (let i = 0; i < u8.length; i++) { y += a * (u8[i] / 255 - y); out[i] = y; } return out; };
+  m.lowSlow = slow(raw.env.low, 1.5); m.fullSlow = slow(raw.env.full, 3);
+  m.sections = raw.sections.map(s => ({ ...s }));
+  m.secT = Float64Array.from(m.sections, s => s.t);
+  // цепочки эха у аккордов: удар сильнее предыдущего или после паузы — новая цепочка
+  m.stabChain = new Int32Array(m.stabs.t.length); m.stabEcho = new Int32Array(m.stabs.t.length);
+  for (let i = 0, c = -1; i < m.stabs.t.length; i++) {
+    const gap = i ? m.stabs.t[i] - m.stabs.t[i - 1] : Infinity, prevS = i ? m.stabs.s[i - 1] : 0;
+    if (gap > 1.3 * m.beatLen || m.stabs.s[i] > prevS * 1.15 + 0.05) { c = i; }
+    m.stabChain[i] = c; m.stabEcho[i] = i - c;
+  }
+  // путь камеры: интеграл скорости по времени (100 Гц) — чистая функция карты и параметров
+  const n = Math.ceil(m.duration * AN.MAP) + 2, cam = new Float64Array(n);
+  for (let i = 1; i < n; i++) {
+    const t = (i - 1) / AN.MAP, sec = m.sections[sectionIndex(m, t)];
+    const lvl = m.fullSlow[Math.min(m.fullSlow.length - 1, i - 1)] || 0;
+    let v = (sec.kick ? 1.6 : 0.55) * (0.7 + 0.6 * lvl) * (1 + 0.9 * tensionAt(m, t) + 1.2 * dropAt(m, t, 1.2));
+    cam[i] = cam[i - 1] + v * p.speed / AN.MAP;
+  }
+  m.cam = cam;
+  return m;
+}
+const upper = (arr, t) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= t) lo = mid + 1; else hi = mid; } return lo; };
+function sectionIndex(m, t) { return Math.max(0, upper(m.secT, t) - 1); }
+function sample(arr, t, scale = 1) { // линейная интерполяция массива 100 Гц
+  const x = t * AN.MAP, i = Math.floor(x), f = x - i;
+  if (i < 0) return arr[0] * scale; if (i + 1 >= arr.length) return arr[arr.length - 1] * scale;
+  return (arr[i] * (1 - f) + arr[i + 1] * f) * scale;
+}
+// нарастание перед дропом (0..1) и вспышка после дропа
+function tensionAt(m, t) {
+  const i = upper(m.secT, t); const next = m.sections[i];
+  if (!next || next.trans !== 'drop') return 0;
+  const len = Math.min(4 * 4 * m.beatLen, next.t - (m.sections[i - 1] ? m.sections[i - 1].t : 0));
+  const u = (t - (next.t - len)) / len; return u <= 0 ? 0 : u >= 1 ? 0 : u * u;
+}
+function dropAt(m, t, tau) {
+  const i = sectionIndex(m, t), s = m.sections[i];
+  if (!s || s.trans !== 'drop' || t < s.t) return 0;
+  return Math.exp(-(t - s.t) / tau);
+}
+function recentEvents(ev, t, maxAge, maxN) {
+  const out = []; for (let i = upper(ev.t, t) - 1; i >= 0 && out.length < maxN; i--) { const age = t - ev.t[i]; if (age > maxAge) break; out.push(i); }
+  return out;
+}
+function envSum(ev, t, tau, win) { let s = 0; for (const i of recentEvents(ev, t, win, 32)) s += ev.s[i] * Math.exp(-(t - ev.t[i]) / tau); return s; }
+// затухающая пружина: толчок от удара, без состояния между кадрами
+function springSum(ev, t, freq, zeta, win) {
+  const w = 2 * Math.PI * freq, wd = w * Math.sqrt(1 - zeta * zeta); let s = 0;
+  for (const i of recentEvents(ev, t, win, 16)) { const a = t - ev.t[i]; s += ev.s[i] * Math.exp(-zeta * w * a) * Math.sin(wd * a); }
+  return s;
+}
+function camAt(m, t) { return sample(m.cam, Math.max(0, t)); }
+function hash01(a, b = 0) { let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35); h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15; return (h >>> 0) / 4294967296; }
+
+/* ==========================================================================
+   WebGL2: сцены (туннель колец, точечное море), растр, второй цвет, зерно, подписи, логотип
+   ========================================================================== */
+const VS_SRC = `#version 300 es
+void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
+
+const FS_MAIN = `#version 300 es
+precision highp float; precision highp int;
+uniform vec2 uRes;
+uniform int uSceneA, uSceneB; uniform float uMix; uniform vec4 uSeedA, uSeedB;
+uniform float uCam;                 // путь камеры (по модулю периода)
+uniform vec2 uVP;                   // точка схода туннеля
+uniform vec3 uSwell; uniform float uSeaZ; // море: фазы волн и сдвиг (считаются в JS)
+uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uBreak, uTension, uFlash, uFog, uRot, uRoll, uBeat;
+uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, путь камеры в момент удара, seed
+uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, угол, путь камеры в момент удара
+uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, seed, -
+uniform float uKickAmt, uStabAmt, uHatAmt;
+uniform int uHalftone; uniform float uCell, uAngle, uMisreg, uInk2Amt;
+uniform vec3 uPaper, uInk, uInk2;
+uniform float uGrain; uniform uint uFrame, uSeed;
+uniform sampler2D uOverlay; uniform int uHasOverlay;
+uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
+out vec4 o;
+
+const float PI = 3.14159265, TAU = 6.2831853, PERIOD = 3072.0;
+uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; return v; }
+float h3(uvec3 v){ return float(pcg3d(v).x) * (1.0 / 4294967295.0); }
+float h1(float a, float b){ return h3(uvec3(uint(int(floor(a)) + 1048576), uint(int(floor(b)) + 1048576), uSeed)); }
+float wrap(float d){ return mod(d + PERIOD * 0.5, PERIOD) - PERIOD * 0.5; }
+float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
+
+// ---------- сцена 0: туннель колец (грув) ----------
+// p — точка экрана в долях H (центр 0,0, y вверх); px — размер «пикселя» выборки в долях H
+vec2 tunnel(vec2 p, vec4 sd, float px){
+  vec2 d = p - uVP;
+  float rho = max(length(d), 1e-4), th = atan(d.y, d.x) + uRoll;
+  float f = 0.42 * (1.0 + 0.035 * uSpring * uKickAmt);
+  float z = f / rho;                                   // глубина стены туннеля
+  float zw = z + uCam;
+  float sp = sd.x;                                     // шаг колец
+  float rr = zw / sp, idx = floor(rr), fr = rr - idx;
+  float ringPx = sp / (f / (rho * rho) * px);          // шаг колец на экране, в «пикселях» выборки
+  uint ri = uint(int(mod(idx, PERIOD / sp)));
+  float hr = h3(uvec3(ri, 7u, uSeed + uint(sd.w)));
+  float width = mix(0.035, 0.11, hr * hr);
+  float aa = 1.0 / max(ringPx, 1e-3);
+  float dist = min(fr, 1.0 - fr);
+  float line = 1.0 - smoothstep(width - aa, width + aa, dist);
+  // штрихи по кругу: у каждого кольца свой рисунок и медленное вращение
+  float pick = h3(uvec3(ri, 11u, uSeed + uint(sd.w)));
+  float dashN = pick < 0.45 ? 0.0 : pick < 0.65 ? 96.0 : pick < 0.8 ? 7.0 : pick < 0.9 ? 3.0 : 24.0;
+  if (dashN > 0.0) {
+    float spin = (h3(uvec3(ri, 13u, uSeed)) - 0.5) * uRot * 0.6;
+    float u = th / TAU * dashN + spin, duty = mix(0.3, 0.75, h3(uvec3(ri, 17u, uSeed)));
+    float aaT = dashN / TAU * px / rho;
+    float g = fract(u);
+    float dash = (1.0 - smoothstep(duty - aaT, duty + aaT, g)) * smoothstep(-aaT, aaT, g);
+    line *= mix(dash, duty, clamp(aaT * 2.0, 0.0, 1.0));
+  }
+  line = mix(line, width * 1.6, 1.0 - smoothstep(1.0, 2.5, ringPx));   // слишком густо — среднее
+  float fogK = 0.17 * uFog * (1.0 + 1.6 * uBreak);
+  float fog = exp(-z * fogK) * smoothstep(0.02, 0.18, z);
+  float base = (0.5 + 0.5 * uLowSlow) * (1.0 + 0.8 * uTension) * (1.0 + 0.45 * min(uKick, 1.0) * uKickAmt); // кольца вспыхивают на кик
+  float L = line * fog * base * (0.75 + 0.25 * hr);
+  float acc = 0.0;
+  // волна кика уходит вглубь
+  for (int i = 0; i < 6; i++) { if (i >= uKickN) break; vec4 k = uKicks[i];
+    float front = k.z + 0.6 + k.x * 7.0;
+    float dz = wrap(zw - front) / 0.9;
+    float g = exp(-dz * dz) * k.y * exp(-k.x / 0.45) * uKickAmt;
+    L += g * (0.18 + line * 1.1) * fog;
+  }
+  // дуги аккордов: висят в мире на месте удара, камера к ним подлетает; эхо — новые дуги рядом
+  for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
+    float dz = wrap(zw - (s.w + 4.5)) / 0.07;
+    float ang = abs(mod(th - s.z + PI, TAU) - PI);
+    float span = 0.35 + 0.45 * fract(s.z * 3.7);
+    float arc = exp(-dz * dz) * (1.0 - smoothstep(span * 0.6, span, ang));
+    float env = s.y * smoothstep(0.0, 0.025, s.x) * exp(-s.x / 1.3) * uStabAmt * smoothstep(0.6, 1.6, z);
+    acc += arc * env * 1.8 * fog;
+  }
+  // хэты: искры на кольцах
+  for (int i = 0; i < 4; i++) { if (i >= uHatN) break; vec4 hh = uHats[i];
+    float cellA = floor((th + PI) / TAU * 96.0);
+    float r = h3(uvec3(ri, uint(cellA), uint(hh.z) + uSeed));
+    float env = hh.y * exp(-hh.x / 0.09) * uHatAmt;
+    acc += step(r, 0.05 * env) * line * fog * 2.0;
+  }
+  // свет в конце туннеля дышит низами
+  float glow = exp(-rho * rho / (0.0035 + 0.004 * uLow)) * (0.25 + 0.75 * uLow) * (1.0 - 0.5 * uBreak);
+  return vec2(L + glow * 0.8, acc);
+}
+
+// ---------- сцена 1: точечное море (интро, брейк, аутро) ----------
+float seaH(vec2 xz, vec4 sd){          // xz — относительно камеры
+  float h = 0.0;
+  h += 0.060 * sin(dot(xz, vec2(0.62, 0.78)) * 1.7 + uSwell.x + sd.y * 6.0);
+  h += 0.040 * sin(dot(xz, vec2(-0.85, 0.52)) * 2.9 + uSwell.y + sd.z * 6.0);
+  h += 0.020 * sin(dot(xz, vec2(0.2, -0.98)) * 6.1 + uSwell.z);
+  h *= (0.55 + 0.9 * uLowSlow) * (1.0 - 0.45 * uBreak);
+  for (int i = 0; i < 6; i++) { if (i >= uKickN) break; vec4 k = uKicks[i];
+    vec2 c = vec2((fract(k.w * 7.31) - 0.5) * 3.0, wrap(k.z - uCam) * 0.35 + 3.5 + fract(k.w * 3.17) * 3.0);
+    float r = length(xz - c), front = k.x * 2.2;
+    h += 0.10 * k.y * uKickAmt * exp(-k.x / 0.8) * exp(-pow((r - front) / 0.18, 2.0)) * sin((r - front) * 18.0);
+  }
+  return h;
+}
+vec2 sea(vec2 p, vec4 sd, float px){
+  float horizon = 0.11 + 0.012 * uSpring * uKickAmt;
+  vec3 ro = vec3(0.0, 0.62, 0.0);
+  vec3 rd = normalize(vec3(p.x, p.y - horizon, 1.15));
+  float fogK = 0.09 * uFog * (1.0 + 1.3 * uBreak);
+  // небо: луна над горизонтом, круги от аккордов расходятся вокруг неё
+  vec2 moon = vec2(sd.y * 0.5 - 0.25, horizon + 0.17);
+  float dm = length(p - moon);
+  float moonR = 0.045 + 0.01 * uLowSlow + 0.025 * uTension;
+  float sky = 0.03 + 0.10 * exp(-max(p.y - horizon, 0.0) * 6.0);
+  float moonL = (1.0 - smoothstep(moonR - px, moonR + px, dm)) * (0.55 + 0.45 * uLowSlow) + exp(-dm * dm / 0.02) * 0.18;
+  float acc = 0.0;
+  for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
+    float r = moonR + 0.012 + s.x * 0.15, w = 0.0025 + s.x * 0.004;
+    float env = s.y * smoothstep(0.0, 0.025, s.x) * exp(-s.x / 1.2) * uStabAmt;
+    acc += exp(-pow((dm - r) / w, 2.0)) * env * 1.4;
+  }
+  // перед дропом: на каждой доле от луны расходится кольцо, луна растёт
+  if (uTension > 0.0) { float r = moonR + 0.015 + uBeat * 0.22; acc += exp(-pow((dm - r) / (0.004 + uBeat * 0.01), 2.0)) * uTension * (1.0 - uBeat) * 1.2; }
+  if (rd.y > -0.002) return vec2(sky + moonL, acc);
+  float t = ro.y / -rd.y;
+  vec2 xz = ro.xz + rd.xz * t;
+  float e = 0.03, h0 = seaH(xz, sd);
+  vec3 n = normalize(vec3(h0 - seaH(xz + vec2(e, 0.0), sd), e, h0 - seaH(xz + vec2(0.0, e), sd)));
+  vec3 Ld = normalize(vec3(moon.x * 0.8, 0.22, 1.0));
+  vec3 rf = reflect(rd, n);
+  float spec = pow(max(dot(rf, Ld), 0.0), 60.0) * 1.6 + pow(max(dot(rf, Ld), 0.0), 8.0) * 0.25;
+  float fog = exp(-t * fogK);
+  float L = (0.04 + 0.12 * max(n.y, 0.0) + spec * (0.6 + 0.6 * uLowSlow)) * fog + (1.0 - fog) * 0.08;
+  // хэты: блики-искры на воде
+  for (int i = 0; i < 4; i++) { if (i >= uHatN) break; vec4 hh = uHats[i];
+    vec2 c = floor((xz + vec2(0.0, uSeaZ)) * 3.0);
+    float r = h3(uvec3(uvec2(ivec2(c) + 4096), uint(hh.z) + uSeed));
+    acc += step(r, 0.03 * hh.y * exp(-hh.x / 0.1) * uHatAmt) * fog * 1.5;
+  }
+  return vec2(L, acc * fog);
+}
+
+vec2 scene(int id, vec2 p, vec4 sd, float px){ return id == 0 ? tunnel(p, sd, px) : sea(p, sd, px); }
+vec2 frameAt(vec2 p, float px){
+  vec2 a = scene(uSceneA, p, uSeedA, px);
+  if (uMix > 0.0) a = mix(a, scene(uSceneB, p, uSeedB, px), uMix);
+  a.x += uFlash;
+  // точка чёрного: в тенях бумага чистая, без сетки мелких точек
+  return clamp((a - 0.035) / 0.965, 0.0, 1.0);
+}
+// растр: «круглая точка» (Euclidean spot) — 0 в центре ячейки, 1 в углах. Краска там, где spot < тон.
+// Сцена считается в каждом пикселе, поэтому края предметов чёткие, а точки видны только в полутонах.
+float halftone(vec2 frag, float tone, float ang, float cs){
+  float c = cos(ang), s = sin(ang);
+  vec2 q = mat2(c, s, -s, c) * frag / cs * TAU;
+  float spot = 0.5 - 0.25 * (cos(q.x) + cos(q.y));
+  float d = tone - spot, w = max(fwidth(d), 1e-4) * 0.75;
+  return smoothstep(-w, w, d);
+}
+void main(){
+  vec2 frag = vec2(gl_FragCoord.x, gl_FragCoord.y);
+  float H = uRes.y;
+  vec2 c0 = 0.5 * uRes;
+  float pxs = uHalftone == 1 ? max(1.0, uCell * 0.5) / H : 1.0 / H;
+  vec2 v = frameAt((frag - c0) / H, pxs);
+  vec3 col;
+  if (uHalftone == 1) {
+    float a1 = radians(uAngle), a2 = radians(uAngle + 30.0);
+    col = mix(uPaper, uInk, halftone(frag, uInk2Amt > 0.0 ? v.x : min(1.0, v.x + v.y), a1, uCell));
+    if (uInk2Amt > 0.0) {
+      // второй цвет печатается со сдвигом (несовмещение красок), своим углом растра
+      vec2 v2 = uMisreg > 0.0 ? frameAt((frag + vec2(uMisreg, -uMisreg * 0.6) - c0) / H, pxs) : v;
+      col = mix(col, uInk2, halftone(frag, v2.y, a2, uCell) * uInk2Amt);
+    }
+  } else {
+    col = mix(uPaper, uInk, uInk2Amt > 0.0 ? v.x : min(1.0, v.x + v.y));
+    col = mix(col, uInk2, v.y * uInk2Amt);
+  }
+  vec2 pix = vec2(frag.x, uRes.y - frag.y); // пиксели, y вниз
+  if (uHasOverlay == 1) { vec4 ov = texelFetch(uOverlay, ivec2(pix), 0); col = col * (1.0 - ov.a) + ov.rgb; }
+  if (uHasLogo == 1) {
+    vec2 lu = (pix - uLogoRect.xy) / uLogoRect.zw;
+    if (all(greaterThanEqual(lu, vec2(0.0))) && all(lessThan(lu, vec2(1.0)))) { vec4 l = texture(uLogo, lu) * uLogoOpacity; col = col * (1.0 - l.a) + l.rgb; }
+  }
+  if (uGrain > 0.0) col += uGrain * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.6))), uFrame);
+  o = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+// упаковка в I420 (BT.709, ограниченный диапазон), как в редакторе пластинки
+const FS_PACK = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D uSrc; uniform ivec2 uSize;
+out vec4 o;
+vec3 px(int x, int y){ return texelFetch(uSrc, ivec2(x, uSize.y - 1 - y), 0).rgb; }
+float Y(vec3 c){ return (16.0 + 219.0 * dot(c, vec3(0.2126, 0.7152, 0.0722))) / 255.0; }
+vec2 UV(int cx, int cy){
+  vec3 c = 0.25 * (px(2 * cx, 2 * cy) + px(2 * cx + 1, 2 * cy) + px(2 * cx, 2 * cy + 1) + px(2 * cx + 1, 2 * cy + 1));
+  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  return (128.0 + 224.0 * vec2((c.b - y) / 1.8556, (c.r - y) / 1.5748)) / 255.0;
+}
+void main(){
+  int W = uSize.x, H = uSize.y;
+  int tx = int(gl_FragCoord.x), ty = int(gl_FragCoord.y);
+  if (ty < H) { int x = tx * 4; o = vec4(Y(px(x, ty)), Y(px(x + 1, ty)), Y(px(x + 2, ty)), Y(px(x + 3, ty))); return; }
+  int k = ty - H; int plane = k / (H / 4); k -= plane * (H / 4);
+  int hw = W / 8; int cy = 2 * k + (tx >= hw ? 1 : 0); int cx = (tx % hw) * 4;
+  vec4 r;
+  for (int i = 0; i < 4; i++) { vec2 uv = UV(cx + i, cy); r[i] = plane == 0 ? uv.x : uv.y; }
+  o = r;
+}`;
+
+class Renderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+    if (!gl) throw new Error('WebGL2 недоступен');
+    this.gl = gl;
+    this.main = this.program(FS_MAIN);
+    this.pack = this.program(FS_PACK);
+    this.vao = gl.createVertexArray();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
+    this.overlayTex = this.makeTex(); this.logoTex = this.makeTex();
+  }
+  program(fs) {
+    const gl = this.gl;
+    const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+    const p = gl.createProgram();
+    gl.attachShader(p, mk(gl.VERTEX_SHADER, VS_SRC)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) { const name = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, ''); u[name] = gl.getUniformLocation(p, name); }
+    return { p, u };
+  }
+  makeTex() {
+    const gl = this.gl, t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    return t;
+  }
+  upload(tex, source) {
+    const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  }
+  setSize(W, H) {
+    const gl = this.gl;
+    if (this.W === W && this.H === H) return;
+    this.W = W; this.H = H; this.canvas.width = W; this.canvas.height = H;
+    for (const k of ['fbTex', 'packTex']) if (this[k]) gl.deleteTexture(this[k]);
+    for (const k of ['fb', 'packFb']) if (this[k]) gl.deleteFramebuffer(this[k]);
+    const mkTarget = (w, h) => {
+      const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      return [t, f];
+    };
+    [this.fbTex, this.fb] = mkTarget(W, H);
+    [this.packTex, this.packFb] = mkTarget(W / 4, H * 3 / 2);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  draw(s) {
+    const gl = this.gl, { p, u } = this.main;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb); gl.viewport(0, 0, this.W, this.H);
+    gl.useProgram(p); gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.overlayTex); gl.uniform1i(u.uOverlay, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.logoTex); gl.uniform1i(u.uLogo, 1);
+    gl.uniform2f(u.uRes, this.W, this.H);
+    gl.uniform1i(u.uSceneA, s.sceneA); gl.uniform1i(u.uSceneB, s.sceneB); gl.uniform1f(u.uMix, s.mix);
+    gl.uniform4fv(u.uSeedA, s.seedA); gl.uniform4fv(u.uSeedB, s.seedB);
+    gl.uniform1f(u.uCam, s.cam); gl.uniform2f(u.uVP, s.vp[0], s.vp[1]); gl.uniform3fv(u.uSwell, s.swell); gl.uniform1f(u.uSeaZ, s.seaZ);
+    for (const k of ['Kick', 'Spring', 'Hat', 'Low', 'Mid', 'High', 'LowSlow', 'Break', 'Tension', 'Flash', 'Fog', 'Rot', 'Roll', 'Beat', 'KickAmt', 'StabAmt', 'HatAmt', 'Cell', 'Angle', 'Misreg', 'Ink2Amt', 'Grain'])
+      gl.uniform1f(u['u' + k], s[k[0].toLowerCase() + k.slice(1)]);
+    gl.uniform4fv(u.uKicks, s.kicks); gl.uniform1i(u.uKickN, s.kickN);
+    gl.uniform4fv(u.uStabs, s.stabs); gl.uniform1i(u.uStabN, s.stabN);
+    gl.uniform4fv(u.uHats, s.hats); gl.uniform1i(u.uHatN, s.hatN);
+    gl.uniform1i(u.uHalftone, s.halftone);
+    gl.uniform3fv(u.uPaper, s.paper); gl.uniform3fv(u.uInk, s.inkC); gl.uniform3fv(u.uInk2, s.ink2C);
+    gl.uniform1ui(u.uFrame, s.frame >>> 0); gl.uniform1ui(u.uSeed, s.seedU >>> 0);
+    gl.uniform1i(u.uHasOverlay, s.hasOverlay);
+    gl.uniform4f(u.uLogoRect, ...s.logoRect); gl.uniform1i(u.uHasLogo, s.hasLogo); gl.uniform1f(u.uLogoOpacity, s.logoOpacity);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  readRGBA() {
+    const gl = this.gl, out = new Uint8Array(this.W * this.H * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fb); gl.readPixels(0, 0, this.W, this.H, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); return out;
+  }
+  readI420(out) {
+    const gl = this.gl, { p, u } = this.pack, w = this.W / 4, h = this.H * 3 / 2;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.packFb); gl.viewport(0, 0, w, h);
+    gl.useProgram(p); gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.fbTex); gl.uniform1i(u.uSrc, 0);
+    gl.uniform2i(u.uSize, this.W, this.H);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+}
+
+/* ==========================================================================
+   Состояние
+   ========================================================================== */
+const RENDER_MODE = new URLSearchParams(location.search).has('render');
+const cv = document.getElementById('cv');
+const R = new Renderer(cv);
+const ov = document.createElement('canvas'), ovx = ov.getContext('2d');
+const state = {
+  p: { ...VDEF }, raw: null, m: null, audioFile: null, audioName: '', duration: null,
+  logo: null, defaultLogo: null, logoName: '', previewScale: 1, fullRes: false,
+};
+const DEFAULT_LOGO = 'data:image/jpeg;base64,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';
+function parseRes(r) { const [w, h] = String(r).split('x').map(Number); return { W: w, H: h }; }
+function outSize() {
+  const { W, H } = parseRes(state.p.res), k = RENDER_MODE || state.fullRes ? 1 : state.previewScale;
+  return k === 1 ? { W, H } : { W: Math.round(W * k / 8) * 8, H: Math.round(H * k / 4) * 4 };
+}
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
+function colors() { const p = state.p, pal = PALETTES[p.palette]; return pal && p.palette !== 'custom' ? pal : { paper: p.paper, ink: p.ink, ink2: p.ink2 }; }
+function durationOf() { return state.duration || (state.m ? state.m.duration : 60); }
+function frameIndex(t) { return Math.floor(t * state.p.fps + 1e-6); }
+let dirtyMap = true;
+function ensureMap() { if (state.raw && (dirtyMap || !state.m)) { state.m = prepareMap(state.raw, state.p); dirtyMap = false; } }
+function trackTitle() { return (state.p.title || state.audioName.replace(/\.[^.]+$/, '') || 'UNTITLED').toUpperCase(); }
+
+/* ==========================================================================
+   Кадр как функция времени
+   ========================================================================== */
+const SCENE_ID = { tunnel: 0, sea: 1 };
+function sceneOfSection(s) { const p = state.p; if (p.scenes !== 'auto') return SCENE_ID[p.scenes]; return s.kick ? 0 : 1; }
+function seedOfSection(i) {
+  const s = state.p.seed, r = (k) => hash01(s * 7919 + i, k);
+  const sp = [0.5, 0.75, 1.0][Math.floor(r(1) * 3)];
+  return [sp, r(2), r(3), Math.floor(r(4) * 1000)];
+}
+function frameState(t) {
+  ensureMap();
+  const p = state.p, m = state.m, c = colors(), { W, H } = outSize();
+  const ts = t + p.syncMs / 1000;
+  const st = { paper: hexToRgb(c.paper), inkC: hexToRgb(c.ink), ink2C: hexToRgb(c.ink2), ink2Amt: p.ink2Amt, halftone: p.halftone ? 1 : 0,
+    cell: Math.max(2, p.cell * H / 1080), angle: p.angle, misreg: p.misreg * H / 1080, grain: p.grain, frame: frameIndex(t), seedU: p.seed,
+    kickAmt: p.kickAmt, stabAmt: p.stabAmt, hatAmt: p.hatAmt, fog: p.fog,
+    kicks: new Float32Array(24), stabs: new Float32Array(48), hats: new Float32Array(16), kickN: 0, stabN: 0, hatN: 0,
+    sceneA: 1, sceneB: 1, mix: 0, seedA: [0.75, 0.3, 0.6, 1], seedB: [0.75, 0.3, 0.6, 1], cam: 0, vp: [0, 0], swell: [0, 0, 0], seaZ: 0,
+    kick: 0, spring: 0, hat: 0, low: 0, mid: 0, high: 0, lowSlow: 0, break: 0, tension: 0, flash: 0, rot: 0, roll: 0, beat: 0,
+    hasOverlay: 0, logoRect: [0, 0, 1, 1], hasLogo: 0, logoOpacity: p.logoOpacity };
+  if (!m) return st;
+  const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
+  const bar = 4 * m.beatLen;
+  // сцены и переход между секциями: дроп — резкая склейка со вспышкой, остальное — растворение за такт
+  st.sceneA = sceneOfSection(sec); st.seedA = seedOfSection(si);
+  if (prev && sec.trans !== 'drop') {
+    const u = (ts - sec.t) / bar;
+    if (u < 1) { st.sceneB = st.sceneA; st.seedB = st.seedA; st.sceneA = sceneOfSection(prev); st.seedA = seedOfSection(si - 1); st.mix = u * u * (3 - 2 * u); }
+  }
+  // брейк: 1 в секциях без кика, плавно за такт
+  const bk = (s) => s && !s.kick ? 1 : 0;
+  const ub = prev ? Math.min(1, Math.max(0, (ts - sec.t) / bar)) : 1;
+  st.break = bk(prev) + (bk(sec) - bk(prev)) * ub;
+  st.tension = tensionAt(m, ts);
+  st.flash = Math.min(0.6, dropAt(m, ts, 0.3) * 0.55 * p.flashAmt); // мягкая вспышка: без полного белого кадра
+  { const bp = (ts - m.beat0) / m.beatLen; st.beat = m.grid ? bp - Math.floor(bp) : 0; }
+  const camW = camAt(m, ts);
+  st.cam = camW % 3072;
+  // море: фазы волн в double, чтобы на часе ролика не было ни ступенек, ни скачков
+  const zc = camW * 0.35, ph = (k, dy, w) => ((k * dy * zc - w * ts) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  st.swell = [ph(1.7, 0.78, 1.1), ph(2.9, 0.52, 1.6), ph(6.1, -0.98, 2.6)];
+  st.seaZ = zc % 1024;
+  st.rot = ts * 0.35;
+  st.roll = (ts * 0.018 + st.seedA[2] * 6.283) % 6.283185307 + 0.012 * st.spring;
+  const env = (k) => sample(m.env[k], ts, 1 / 255);
+  st.low = env('low'); st.mid = env('mid'); st.high = env('high');
+  st.lowSlow = sample(m.lowSlow, ts);
+  st.kick = Math.min(1.5, envSum(m.kicks, ts, 0.16, 1.2));
+  st.spring = springSum(m.kicks, ts, 2.6, 0.32, 1.6);
+  st.hat = Math.min(1.5, envSum(m.hats, ts, 0.07, 0.5));
+  st.vp = [0.07 * Math.sin(ts * 0.21 + st.seedA[1] * 6) * (1 - st.tension), 0.045 * Math.sin(ts * 0.17 + st.seedA[2] * 6) * (1 - st.tension)];
+  // события для шейдера: возраст, сила, путь камеры в момент удара, seed
+  recentEvents(m.kicks, ts, 2.5, 6).forEach((i, k) => { st.kicks.set([ts - m.kicks.t[i], m.kicks.s[i], camAt(m, m.kicks.t[i]) % 3072, hash01(i, 5)], k * 4); st.kickN = k + 1; });
+  recentEvents(m.stabs, ts, 4.5, 12).forEach((i, k) => {
+    const chain = m.stabChain[i], echo = m.stabEcho[i];
+    const ang = (hash01(chain, 9) * 2 - 1) * Math.PI + echo * (echo % 2 ? 1.1 : -0.7);
+    st.stabs.set([ts - m.stabs.t[i], m.stabs.s[i], ang, camAt(m, m.stabs.t[i]) % 3072], k * 4); st.stabN = k + 1;
+  });
+  recentEvents(m.hats, ts, 0.5, 4).forEach((i, k) => { st.hats.set([ts - m.hats.t[i], m.hats.s[i], i, 0], k * 4); st.hatN = k + 1; });
+  st.sec = sec; st.si = si; st.ts = ts;
+  return st;
+}
+
+/* ==========================================================================
+   Подписи: ленты с данными трека, отметки событий, пометки «от руки». Тоже чистая функция времени.
+   ========================================================================== */
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const SANS = '"Helvetica Neue", Helvetica, Arial, sans-serif', MONO = '"SF Mono", Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace';
+function tape(g, x, y, text, size, rot, fg, bg, reveal = 1, alpha = 1) {
+  if (alpha <= 0 || reveal <= 0) return;
+  g.save(); g.globalAlpha = alpha; g.translate(x, y); g.rotate(rot * Math.PI / 180);
+  g.font = `700 ${size}px ${SANS}`; g.letterSpacing = `${(size * 0.14).toFixed(1)}px`;
+  const w = g.measureText(text).width, padX = size * 0.5, h = size * 1.42;
+  const shown = text.slice(0, Math.ceil(text.length * Math.min(1, reveal)));
+  // лента с неровными торцами
+  g.fillStyle = bg; g.beginPath(); g.moveTo(0, 0);
+  const tw = w + padX * 2 - size * 0.14, R = mulberry32(text.length * 131 + Math.round(size));
+  g.lineTo(tw, 0); for (let i = 1; i <= 4; i++) g.lineTo(tw + (R() - 0.5) * size * 0.18, h * i / 4);
+  g.lineTo(0, h); for (let i = 3; i >= 1; i--) g.lineTo((R() - 0.5) * size * 0.18, h * i / 4);
+  g.closePath(); g.fill();
+  g.fillStyle = fg; g.textBaseline = 'middle'; g.fillText(shown, padX, h * 0.53);
+  g.restore();
+  return { w: w + padX * 2, h };
+}
+function scribble(g, cx, cy, rx, ry, prog, seed, lw, color, alpha) {
+  if (prog <= 0 || alpha <= 0) return;
+  const R = mulberry32(seed), ph1 = R() * 6.28, ph2 = R() * 6.28, a1 = 0.04 + 0.03 * R(), a2 = 0.02 + 0.02 * R(), start = R() * 6.28, turns = 1.18;
+  g.save(); g.globalAlpha = alpha; g.strokeStyle = color; g.lineWidth = lw; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath();
+  const n = 160, end = Math.max(1, Math.floor(n * Math.min(1, prog)));
+  for (let i = 0; i <= end; i++) {
+    const u = i / n, a = start + u * turns * Math.PI * 2, k = 1 + a1 * Math.sin(3 * a + ph1) + a2 * Math.sin(7 * a + ph2) + 0.05 * u;
+    const x = cx + rx * k * Math.cos(a), y = cy + ry * k * Math.sin(a);
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  }
+  g.stroke(); g.restore();
+}
+function fmt(t) { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + s.toFixed(2).padStart(5, '0'); }
+const SEC_NAME = { intro: 'INTRO', groove: 'GROOVE', break: 'BREAK', outro: 'OUTRO' };
+function drawOverlay(st, W, H) {
+  const p = state.p, m = state.m, c = colors(), u = H / 1080;
+  if (ov.width !== W || ov.height !== H) { ov.width = W; ov.height = H; }
+  const g = ovx; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
+  if (!m || !p.overlay) return false;
+  const ts = st.ts, P = m.beatLen, bar = 4 * P;
+  const beatPos = (ts - m.beat0) / P, beatI = Math.floor(beatPos), barI = Math.floor((beatI - m.barPhase) / 4), inBar = ((beatI - m.barPhase) % 4 + 4) % 4;
+  const tapeBg = c.ink, tapeFg = c.paper;
+  // 1) название: печатается по шестнадцатым с начала трека
+  const t16 = m.grid ? P / 4 : 0.06;
+  const artist = (p.artist || '').toUpperCase(), title = trackTitle();
+  const rev = (len, t0) => Math.min(1, Math.max(0, (ts - t0) / (t16 * len)));
+  const x0 = 46 * u, y0 = 44 * u;
+  if (artist) tape(g, x0, y0, artist, 22 * u, -1.2, tapeFg, tapeBg, rev(artist.length, 0.4));
+  tape(g, x0 + 10 * u, y0 + 40 * u, title, 34 * u, 0.8, tapeFg, tapeBg, rev(title.length, 0.4 + t16 * artist.length));
+  // 2) карточка данных внизу слева: темп, такт, время, секция, отсчёт до дропа, индикаторы ударов, уровни
+  const lx = 50 * u, ly = H - 150 * u, fs = 16 * u, lh = 23 * u;
+  g.save(); g.globalAlpha = 0.84; g.fillStyle = c.paper; g.fillRect(lx - 14 * u, ly - 26 * u, 392 * u, 140 * u);
+  g.globalAlpha = 0.55; g.strokeStyle = c.ink; g.lineWidth = 1 * u; g.strokeRect(lx - 14 * u, ly - 26 * u, 392 * u, 140 * u); g.restore();
+  g.font = `500 ${fs}px ${MONO}`; g.textBaseline = 'alphabetic'; g.letterSpacing = '0px'; g.fillStyle = c.ink;
+  const pad = (n, k) => String(Math.max(0, n)).padStart(k, '0');
+  const sixteenth = Math.floor((beatPos - beatI) * 4);
+  g.globalAlpha = 0.95;
+  g.fillText(m.grid ? `BPM ${(60 / P).toFixed(2)}   BAR ${pad(barI + 1, 3)}.${inBar + 1}.${sixteenth + 1}` : 'BPM —   BAR —', lx, ly);
+  g.fillText(`TIME ${fmt(ts)} / ${fmt(m.duration)}`, lx, ly + lh);
+  const sec = st.sec, secLabel = `${SEC_NAME[sec.type] || sec.type.toUpperCase()}${sec.n ? ' ' + pad(sec.n, 2) : ''}`;
+  const next = m.sections[st.si + 1];
+  let cd = '';
+  if (next && next.trans === 'drop' && m.grid) {
+    const left = next.t - ts, beats = Math.ceil(left / P - 1e-6);
+    cd = beats <= 4 ? `   DROP IN ${beats}` : left < 8 * bar ? `   DROP IN ${Math.ceil(left / bar - 1e-6)} BARS` : '';
+  }
+  g.fillText(`SECTION ▸ ${secLabel}${cd}`, lx, ly + 2 * lh);
+  // индикаторы: горят на ударах
+  const ind = [['KICK', st.kick], ['CHORD', Math.min(1, envSum(m.stabs, ts, 0.12, 0.6))], ['HAT', st.hat]];
+  ind.forEach(([name, v], i) => {
+    const x = lx + i * 96 * u, y = ly + 3 * lh + 8 * u;
+    g.globalAlpha = 0.3 + 0.7 * Math.min(1, v);
+    g.beginPath(); g.arc(x + 6 * u, y - 5 * u, 6 * u, 0, Math.PI * 2); g.fillStyle = v > 0.25 ? c.ink2 : c.ink; g.fill();
+    g.fillStyle = c.ink; g.fillText(name, x + 17 * u, y);
+  });
+  // полосы-уровни с удержанием пика
+  [['L', m.env.low], ['M', m.env.mid], ['H', m.env.high]].forEach(([name, arr], i) => {
+    const x = lx + 312 * u + i * 18 * u, y = ly - 12 * u, hh = 84 * u, v = sample(arr, ts, 1 / 255);
+    let pk = 0; for (let k = 0; k < 80; k++) pk = Math.max(pk, sample(arr, ts - k / 100, 1 / 255) - k * 0.006);
+    g.globalAlpha = 0.22; g.fillStyle = c.ink; g.fillRect(x, y, 9 * u, hh);
+    g.globalAlpha = 0.9; g.fillRect(x, y + hh * (1 - v), 9 * u, hh * v);
+    g.fillRect(x - 2 * u, y + hh * (1 - pk) - 1 * u, 13 * u, 2 * u);
+    g.globalAlpha = 0.8; g.font = `500 ${11 * u}px ${MONO}`; g.fillText(name, x + 1 * u, y + hh + 14 * u);
+    g.font = `500 ${fs}px ${MONO}`;
+  });
+  g.globalAlpha = 1;
+  // 3) штамп секции: печатается за долю, держится два такта, потом зачёркивается и гаснет
+  if (st.si > 0 || ts > bar) {
+    const age = ts - sec.t, life = 2 * bar;
+    if (age >= 0 && age < life + bar) {
+      const big = sec.trans === 'drop', text = big ? 'DROP' : sec.trans === 'break' ? 'BREAK' : secLabel;
+      const size = (big ? 64 : 40) * u, fade = age < life ? 1 : 1 - (age - life) / bar;
+      const x = W * 0.5 - (big ? 120 : 90) * u, y = H * (big ? 0.16 : 0.18);
+      const box = tape(g, x, y, text, size, big ? -3 : 2, tapeFg, tapeBg, age / (P * 0.75), fade);
+      if (box && age > life * 0.75) { g.save(); g.globalAlpha = fade; g.strokeStyle = c.ink2; g.lineWidth = 4 * u; g.beginPath(); const k = Math.min(1, (age - life * 0.75) / (P * 0.5)); g.moveTo(x - 6 * u, y + box.h * 0.6); g.lineTo(x - 6 * u + (box.w + 12 * u) * k, y + box.h * 0.45); g.stroke(); g.restore(); }
+      if (big && p.marks) scribble(g, W / 2 + st.vp[0] * H, H / 2 - st.vp[1] * H, 0.2 * H, 0.15 * H, age / 0.45, Math.round(sec.t * 1000), 5 * u, c.ink2, fade);
+    }
+  }
+  // 4) подпись к последнему аккорду в туннеле: выноска к дуге
+  if (st.sceneA === 0 && st.mix < 0.5 && p.stabAmt > 0) {
+    const ids = recentEvents(m.stabs, ts, 1.4, 1);
+    if (ids.length) {
+      const i = ids[0], age = ts - m.stabs.t[i], z = (camAt(m, m.stabs.t[i]) + 4.5) - camAt(m, ts);
+      if (z > 0.35) {
+        const ang = (hash01(m.stabChain[i], 9) * 2 - 1) * Math.PI + m.stabEcho[i] * (m.stabEcho[i] % 2 ? 1.1 : -0.7);
+        const rho = 0.42 / z, ax = W / 2 + (st.vp[0] + rho * Math.cos(ang)) * H, ay = H / 2 - (st.vp[1] + rho * Math.sin(ang)) * H;
+        if (ax > 60 * u && ax < W - 260 * u && ay > 120 * u && ay < H - 200 * u) {
+          const a = Math.min(1, age / 0.06) * Math.exp(-age / 0.9), lxx = ax + 60 * u, lyy = ay - 50 * u;
+          g.save(); g.globalAlpha = a; g.strokeStyle = c.ink; g.lineWidth = 1.5 * u; g.beginPath(); g.moveTo(ax, ay); g.lineTo(lxx, lyy); g.lineTo(lxx + 26 * u, lyy); g.stroke(); g.restore();
+          tape(g, lxx + 28 * u, lyy - 14 * u, m.stabEcho[i] ? `ECHO ${m.stabEcho[i]}` : 'CHORD', 16 * u, 0, tapeFg, tapeBg, 1, a);
+        }
+      }
+    }
+  }
+  // 5) метки совмещения по углам, как на печатном листе
+  g.globalAlpha = 0.5; g.strokeStyle = c.ink; g.lineWidth = 1 * u;
+  for (const [x, y] of [[22 * u, 22 * u], [W - 22 * u, 22 * u]]) { g.beginPath(); g.arc(x, y, 7 * u, 0, Math.PI * 2); g.moveTo(x - 12 * u, y); g.lineTo(x + 12 * u, y); g.moveTo(x, y - 12 * u); g.lineTo(x, y + 12 * u); g.stroke(); }
+  g.globalAlpha = 1;
+  return true;
+}
+
+let logoKey = '';
+function prepareLogo(st, W, H) {
+  const p = state.p, img = p.logoMode === 'none' ? null : (p.logoMode === 'file' && state.logo) || state.defaultLogo;
+  if (!img) return;
+  const lh = Math.max(1, Math.round(p.logoSize * H)), lw = Math.max(1, Math.round(lh * img.width / img.height));
+  const key = [img === state.logo ? state.logoName : 'default', lw, lh].join('|');
+  if (key !== logoKey) {
+    const cnv = document.createElement('canvas'); cnv.width = lw; cnv.height = lh;
+    const g = cnv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, lw, lh);
+    R.upload(R.logoTex, cnv); logoKey = key;
+  }
+  st.hasLogo = 1; st.logoRect = [Math.round(W - p.logoRight * H - lw), Math.round(H - p.logoBottom * H - lh), lw, lh];
+}
+
+function seek(t) {
+  const { W, H } = outSize();
+  R.setSize(W, H);
+  const st = frameState(t);
+  if (state.m) { st.hasOverlay = drawOverlay(st, W, H) ? 1 : 0; if (st.hasOverlay) R.upload(R.overlayTex, ov); }
+  prepareLogo(st, W, H);
+  R.draw(st);
+  return st;
+}
+
+/* ==========================================================================
+   API для тестов и рендера
+   ========================================================================== */
+async function loadImageBlob(blob) { return createImageBitmap(blob, { imageOrientation: 'from-image', premultiplyAlpha: 'none', colorSpaceConversion: 'default' }); }
+async function sha256hex(buf) { const h = await crypto.subtle.digest('SHA-256', buf); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+const ready = fetch(DEFAULT_LOGO).then(r => r.blob()).then(loadImageBlob).then(b => { state.defaultLogo = b; logoKey = ''; });
+window.VZ = {
+  VDEF, ready,
+  gpu: () => R.gpu,
+  setParams(obj) { Object.assign(state.p, obj); dirtyMap = true; if (!RENDER_MODE) { syncControls(); redraw(); } },
+  getParams: () => ({ ...state.p }),
+  async analyzeBuffer(buf) { state.raw = await analyzeTrack(buf); dirtyMap = true; return mapToJSON(state.raw); },
+  setMap(json) { state.raw = mapFromJSON(json); dirtyMap = true; },
+  getMap: () => state.raw && mapToJSON(state.raw),
+  setDuration(sec) { state.duration = sec; },
+  setTitle(name) { state.audioName = name; },
+  seek: (t) => { const st = seek(t); return { scene: st.sceneA, mix: st.mix, kick: st.kick, flash: st.flash, tension: st.tension, sec: st.sec && st.sec.type }; },
+  async hashFrame(n) { seek(n / state.p.fps); return sha256hex(R.readRGBA()); },
+  pngFrame(n) { seek(n / state.p.fps); return cv.toDataURL('image/png').split(',')[1]; },
+  async h264Support(W, H, fps, bitrate) {
+    if (typeof VideoEncoder === 'undefined') return { supported: false, reason: 'нет WebCodecs' };
+    const mbps = Math.ceil(W / 16) * Math.ceil(H / 16) * fps;
+    const levels = [[245760, '28'], [522240, '2a'], [589824, '32'], [983040, '33'], [2073600, '34']];
+    const first = (levels.find(([mx]) => mbps <= mx) || levels[levels.length - 1])[1];
+    for (const codec of [...new Set([first, '33', '34'])].map(l => 'avc1.6400' + l)) {
+      for (const hardwareAcceleration of ['prefer-hardware', 'no-preference']) {
+        try { const s = await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate, framerate: fps, hardwareAcceleration, avc: { format: 'annexb' } }); if (s.supported) return { supported: true, codec, hardwareAcceleration }; } catch (e) { }
+      }
+    }
+    return { supported: false, reason: 'H.264 в WebCodecs не поддерживается' };
+  },
+  // кадры [start, start+count) уходят POST-запросами на sinkUrl: H.264 из WebCodecs или сырой yuv420p
+  async exportRun(o) {
+    const p = state.p, fps = p.fps, { W, H } = parseRes(p.res);
+    state.fullRes = true;
+    const batchBytes = o.batchBytes || 16 << 20;
+    let parts = [], partBytes = 0, inflight = Promise.resolve(), sentBytes = 0, err = null;
+    const send = () => {
+      if (!parts.length) return inflight;
+      const body = new Blob(parts); parts = []; partBytes = 0; sentBytes += body.size;
+      const prev = inflight;
+      inflight = prev.then(() => fetch(o.sinkUrl, { method: 'POST', body }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'приёмник ответил ' + r.status); }));
+      return prev;
+    };
+    const push = (buf) => { parts.push(buf); partBytes += buf.byteLength; };
+    const t0 = performance.now(); let lastReport = t0;
+    const report = (i, final) => {
+      const now = performance.now();
+      if (!final && now - lastReport < 1000) return;
+      lastReport = now;
+      if (window.__vsProgress) window.__vsProgress({ done: i, total: o.count, sec: (now - t0) / 1000, bytes: sentBytes + partBytes });
+    };
+    try {
+      if (o.mode === 'raw') {
+        const frameBytes = W * H * 3 / 2;
+        for (let i = 0; i < o.count; i++) {
+          if (o.shouldStop?.()) throw new Error('Отменено');
+          seek((o.start + i) / fps);
+          const buf = new Uint8Array(frameBytes); R.readI420(buf); push(buf);
+          if (partBytes >= batchBytes) await send();
+          report(i + 1);
+        }
+      } else {
+        let lastTs = -1;
+        const enc = new VideoEncoder({
+          output: (chunk) => {
+            if (chunk.timestamp <= lastTs) err ||= new Error('энкодер переставляет кадры (B-кадры)');
+            lastTs = chunk.timestamp;
+            const buf = new Uint8Array(chunk.byteLength); chunk.copyTo(buf); push(buf);
+          },
+          error: (e) => { err = e; },
+        });
+        const cfg = { codec: o.codec, width: W, height: H, bitrate: o.bitrate, framerate: fps, latencyMode: 'quality', avc: { format: 'annexb' } };
+        if (o.hardwareAcceleration) cfg.hardwareAcceleration = o.hardwareAcceleration;
+        enc.configure(cfg);
+        const gop = Math.max(1, o.gop), yuv = new Uint8Array(W * H * 3 / 2);
+        for (let i = 0; i < o.count; i++) {
+          if (err) throw err;
+          if (o.shouldStop?.()) { enc.close(); throw new Error('Отменено'); }
+          seek((o.start + i) / fps);
+          R.readI420(yuv);
+          const vf = new VideoFrame(yuv, { format: 'I420', codedWidth: W, codedHeight: H, timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps),
+            colorSpace: { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false } });
+          enc.encode(vf, { keyFrame: i % gop === 0 }); vf.close();
+          while (enc.encodeQueueSize > 6) await new Promise(r => enc.addEventListener('dequeue', r, { once: true }));
+          if (partBytes >= batchBytes) await send();
+          report(i + 1);
+        }
+        await enc.flush(); enc.close();
+        if (err) throw err;
+      }
+      await send(); await inflight;
+    } finally { state.fullRes = false; }
+    report(o.count, true);
+    return { frames: o.count, sec: (performance.now() - t0) / 1000, bytes: sentBytes };
+  },
+};
+
+/* ==========================================================================
+   Интерфейс
+   ========================================================================== */
+const $ = (id) => document.getElementById(id);
+const clock = { t: 0, playing: false, wall0: 0, t0: 0, audioOk: false, lastAT: -1, lastATwall: 0 };
+const audio = new Audio(); audio.preload = 'auto';
+let audioUrl = null;
+const controls = {};
+
+function currentT() {
+  if (!clock.playing) return clock.t;
+  const now = performance.now();
+  if (state.audioFile && clock.audioOk) {
+    const at = audio.currentTime;
+    if (at !== clock.lastAT) { clock.lastAT = at; clock.lastATwall = now; return at; }
+    if (now - clock.lastATwall < 400) return at;
+    clock.audioOk = false; clock.t0 = at; clock.wall0 = clock.lastATwall;
+  }
+  return clock.t0 + (now - clock.wall0) / 1000;
+}
+function setT(t) {
+  const T = durationOf(); t = Math.min(Math.max(0, t), T);
+  clock.t = t; clock.t0 = t; clock.wall0 = performance.now();
+  if (state.audioFile) audio.currentTime = t;
+  redraw();
+}
+function play(on) {
+  if (!state.m) return;
+  if (!on && clock.playing) clock.t = currentT();
+  clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶';
+  if (on) {
+    clock.t0 = clock.t; clock.wall0 = performance.now(); clock.audioOk = false;
+    if (state.audioFile) { audio.currentTime = clock.t; audio.play().then(() => { clock.t0 = currentT(); clock.wall0 = performance.now(); clock.lastAT = -1; clock.audioOk = clock.playing; }).catch(() => { }); }
+    loop();
+  } else { if (state.audioFile) audio.pause(); redraw(); }
+}
+let fpsCount = 0, fpsT = performance.now();
+function redraw() {
+  const t = currentT(), T = durationOf();
+  const st = seek(t);
+  $('seekbar').max = T; $('seekbar').value = t;
+  $('time').innerHTML = `<b>${fmt(t)}</b> / ${fmt(T)}`;
+  if (state.m && st.sec) {
+    const m = state.m, beatPos = (st.ts - m.beat0) / m.beatLen;
+    $('stBeat').textContent = m.grid ? `${(60 / m.beatLen).toFixed(2)} BPM · такт ${Math.floor((Math.floor(beatPos) - m.barPhase) / 4) + 1}` : 'без сетки';
+    $('stSec').textContent = `секция: ${({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[st.sec.type] || st.sec.type}${st.sec.n ? ' ' + st.sec.n : ''} · сцена: ${['туннель', 'море'][st.sceneA]}`;
+  }
+  drawTimelineTop(t);
+}
+function loop() {
+  if (!clock.playing) return;
+  if (currentT() >= durationOf()) { clock.t = durationOf(); play(false); return; }
+  redraw();
+  fpsCount++; const now = performance.now();
+  if (now - fpsT > 1000) { $('stFps').textContent = `превью ${(fpsCount * 1000 / (now - fpsT)).toFixed(0)} fps`; fpsCount = 0; fpsT = now; }
+  requestAnimationFrame(loop);
+}
+
+// ---------- карта трека под картинкой ----------
+const TL_COL = { intro: '#3b4a5a', groove: '#3f5e3a', break: '#5a4632', outro: '#4a3b5a' };
+function drawTimelineBase() {
+  const box = $('tl'), cb = $('tlBase'), ct = $('tlTop'), dpr = window.devicePixelRatio || 1;
+  const w = Math.max(10, Math.round(box.clientWidth * dpr)), h = Math.round(box.clientHeight * dpr);
+  for (const c of [cb, ct]) { c.width = w; c.height = h; }
+  const g = cb.getContext('2d'); g.clearRect(0, 0, w, h);
+  const m = state.m; if (!m) return;
+  const T = m.duration, X = (t) => t / T * w;
+  // секции
+  m.sections.forEach((s, i) => {
+    const x0 = X(s.t), x1 = X(i + 1 < m.sections.length ? m.sections[i + 1].t : T);
+    g.fillStyle = TL_COL[s.type] || '#333'; g.globalAlpha = 0.55; g.fillRect(x0, 0, x1 - x0, h);
+    g.globalAlpha = 1; g.fillStyle = '#e6e6e6'; g.font = `${11 * dpr}px -apple-system, sans-serif`;
+    g.fillText(`${({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[s.type] || s.type}${s.n ? ' ' + s.n : ''}${s.trans === 'drop' ? ' ▲' : ''}`, x0 + 4 * dpr, 13 * dpr);
+    g.fillStyle = '#e6e6e6'; g.fillRect(x0, 0, 1 * dpr, h);
+  });
+  // огибающие полос
+  const lane = (arr, y0, hh, color) => {
+    g.strokeStyle = color; g.lineWidth = 1 * dpr; g.beginPath();
+    for (let x = 0; x < w; x++) { const i0 = Math.floor(x / w * arr.length), i1 = Math.max(i0 + 1, Math.floor((x + 1) / w * arr.length)); let mx = 0; for (let i = i0; i < i1; i++) mx = Math.max(mx, arr[i]); const y = y0 + hh - mx / 255 * hh; x ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke();
+  };
+  lane(m.env.low, 18 * dpr, 30 * dpr, '#7fe04a'); lane(m.env.mid, 18 * dpr, 30 * dpr, '#5aa0c8'); lane(m.env.high, 18 * dpr, 30 * dpr, '#e9e5da');
+  // удары
+  const ticks = (ev, y, hh, color) => { g.fillStyle = color; for (let i = 0; i < ev.t.length; i++) g.fillRect(X(ev.t[i]), y + hh * (1 - ev.s[i]), Math.max(1, dpr * 0.8), hh * ev.s[i]); };
+  ticks(m.kicks, 56 * dpr, 16 * dpr, '#7fe04a'); ticks(m.stabs, 76 * dpr, 16 * dpr, '#5aa0c8'); ticks(m.hats, 96 * dpr, 14 * dpr, '#cfcac0');
+  g.fillStyle = '#8b9199'; g.font = `${9 * dpr}px -apple-system, sans-serif`;
+  g.fillText('кик', 2 * dpr, 70 * dpr); g.fillText('аккорды', 2 * dpr, 90 * dpr); g.fillText('хэты', 2 * dpr, 108 * dpr);
+}
+function drawTimelineTop(t) {
+  const ct = $('tlTop'), g = ct.getContext('2d'); g.clearRect(0, 0, ct.width, ct.height);
+  if (!state.m) return;
+  const x = t / state.m.duration * ct.width;
+  g.fillStyle = '#ff6b6b'; g.fillRect(Math.round(x), 0, 2, ct.height);
+}
+
+// ---------- панель ----------
+function buildControls() {
+  const root = $('controls');
+  for (const sec of SCHEMA) {
+    const d = document.createElement('details'); d.open = sec.open;
+    d.innerHTML = `<summary>${sec.title}</summary>`;
+    for (const it of sec.items) {
+      const k = it.k || 1; let el;
+      if (it.type === 'check') {
+        el = document.createElement('label'); el.className = 'check'; el.innerHTML = `<input type="checkbox"> ${it.label}`;
+        const inp = el.querySelector('input'); inp.onchange = () => set(it.key, inp.checked);
+        controls[it.key] = () => { inp.checked = !!state.p[it.key]; };
+      } else if (it.type === 'select' || it.type === 'color' || it.type === 'text') {
+        el = document.createElement('div'); el.className = 'row wide';
+        el.innerHTML = `<label>${it.label}</label>` + (it.type === 'select' ? `<select>${it.options.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>` : `<input type="${it.type}">`);
+        const inp = el.querySelector('select, input');
+        inp.oninput = () => set(it.key, it.num ? Number(inp.value) : inp.value);
+        controls[it.key] = () => { inp.value = state.p[it.key]; };
+      } else {
+        el = document.createElement('div'); el.className = 'row';
+        el.innerHTML = `<label>${it.label}<i title="Вернуть по умолчанию">↺</i></label><input type="range" min="${it.min * k}" max="${it.max * k}" step="${it.step * k}"><input type="number" step="any">`;
+        const [rg, nb] = el.querySelectorAll('input'), round = (v) => +(+v).toFixed(6);
+        rg.oninput = () => set(it.key, round(rg.value / k)); nb.onchange = () => set(it.key, round(nb.value / k));
+        el.querySelector('i').onclick = () => set(it.key, VDEF[it.key]);
+        controls[it.key] = () => { const v = round(state.p[it.key] * k); rg.value = v; nb.value = v; };
+      }
+      d.appendChild(el);
+    }
+    root.appendChild(d);
+  }
+}
+function syncControls() { for (const f of Object.values(controls)) f(); }
+const MAP_KEYS = new Set(['speed', 'bpmFix', 'gridShiftMs']);
+function set(key, val) {
+  state.p[key] = val;
+  if (key === 'palette' && PALETTES[val]) Object.assign(state.p, PALETTES[val]);
+  if (['paper', 'ink', 'ink2'].includes(key)) state.p.palette = 'custom';
+  if (MAP_KEYS.has(key)) { dirtyMap = true; ensureMap(); drawTimelineBase(); }
+  syncControls();
+  try { localStorage.setItem('vinyl-spin:viz', JSON.stringify(state.p)); } catch (e) { }
+  if (!clock.playing) redraw();
+}
+
+// ---------- файлы ----------
+async function analyzeFile(file) {
+  const st = $('anStatus'), bar = $('anBar');
+  bar.hidden = false; bar.value = 0; st.className = 'note'; $('vpHint').hidden = true;
+  const t0 = performance.now();
+  try {
+    state.raw = await analyzeTrack(await file.arrayBuffer(), (v, msg) => { bar.value = v; st.textContent = msg; });
+    dirtyMap = true; ensureMap();
+    const m = state.raw, secs = m.sections.map(s => ({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[s.type]).join(' → ');
+    st.className = 'note ok';
+    st.textContent = `Готово за ${((performance.now() - t0) / 1000).toFixed(1)} с: ${m.bpm ? m.bpm.toFixed(2) + ' BPM' : 'темп не найден'}, ` +
+      `${m.kicks.length} киков, ${m.stabs.length} аккордов и эхо, ${m.hats.length} хэтов.\nСекции: ${secs}.`;
+  } catch (e) {
+    st.className = 'note warn'; st.textContent = 'Не получилось разобрать трек: ' + e.message; state.raw = null; state.m = null;
+  }
+  bar.hidden = true;
+  drawTimelineBase(); setT(0);
+}
+async function setFile(kind, file) {
+  const drop = document.querySelector(`.drop[data-kind="${kind}"]`);
+  if (kind === 'audio') {
+    if (!file) { audio.pause(); audio.removeAttribute('src'); state.audioFile = null; state.raw = null; state.m = null; state.duration = null; drop.classList.remove('has'); drop.querySelector('small').textContent = 'WAV / AIFF / FLAC / MP3'; $('anStatus').textContent = 'Трек не загружен.'; $('vpHint').hidden = false; drawTimelineBase(); redraw(); return; }
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(file); audio.src = audioUrl;
+    state.audioFile = file; state.audioName = file.name; state.duration = null; studio.upload = null;
+    drop.classList.add('has'); drop.querySelector('small').textContent = file.name;
+    await analyzeFile(file);
+    return;
+  }
+  // логотип
+  if (!file) { state.logo = null; state.logoName = ''; set('logoMode', 'none'); updateLogoDrop(); return; }
+  state.logo = await loadImageBlob(file); state.logoName = file.name; logoKey = '';
+  set('logoMode', 'file'); updateLogoDrop();
+}
+function updateLogoDrop() {
+  const drop = document.querySelector('.drop[data-kind="logo"]'), mode = state.p.logoMode, own = mode === 'file' && state.logo;
+  drop.classList.toggle('has', mode !== 'none');
+  drop.querySelector('small').textContent = mode === 'none' ? 'без логотипа · перетащи свой' : own ? state.logoName : 'стандартный · перетащи свой';
+}
+function download(data, name) { const a = document.createElement('a'); a.href = typeof data === 'string' ? data : URL.createObjectURL(data); a.download = name; a.click(); if (typeof data !== 'string') setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+function baseName() { return (state.audioName || 'viz').replace(/\.[^.]+$/, ''); }
+function savePreset() {
+  const data = { app: 'vinyl-spin-viz', version: 1, params: { ...state.p }, audio: state.audioName, map: state.raw ? mapToJSON(state.raw) : null };
+  download(new Blob([JSON.stringify(data)], { type: 'application/json' }), `${baseName()}.viz.json`);
+}
+function applyPreset(data) {
+  const params = data.params || data;
+  for (const k of Object.keys(VDEF)) if (k in params) state.p[k] = params[k];
+  if (data.map && (!state.audioName || !data.audio || data.audio === state.audioName)) { state.raw = mapFromJSON(data.map); }
+  dirtyMap = true; ensureMap(); syncControls(); updateLogoDrop(); drawTimelineBase(); setT(clock.t);
+}
+
+// ---------- рендер через студию (vinyl-spin.command) ----------
+const studio = { info: null, cancel: false, upload: null, jobId: null, lastJob: null };
+async function detectStudio() {
+  if (!location.protocol.startsWith('http')) return;
+  try { const r = await fetch('/api/ping'); studio.info = await r.json(); } catch { return; }
+  $('rNoStudio').hidden = true; $('rStudio').hidden = false;
+  $('rWhere').textContent = `Ролики сохраняются в ${studio.info.outDir}. ${studio.info.ffmpeg}`;
+  $('bRender').onclick = () => renderVideo().catch(e => rStatus('Ошибка: ' + e.message, 'warn'));
+  $('bCancel').onclick = async () => { studio.cancel = true; if (studio.jobId) await fetch(`/api/job/${studio.jobId}/cancel`, { method: 'POST' }).catch(() => { }); };
+  $('bReveal').onclick = () => studio.lastJob && fetch(`/api/job/${studio.lastJob}/reveal`, { method: 'POST' });
+}
+function rStatus(t, cls = '') { const el = $('rStatus'); el.textContent = t; el.className = 'note ' + cls; }
+async function postJSON(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j;
+}
+async function renderVideo() {
+  if (!state.audioFile || !state.m) throw new Error('сначала загрузи трек');
+  const p = state.p, { W, H } = parseRes(p.res), fps = p.fps;
+  play(false);
+  $('rReport').hidden = true; $('bReveal').hidden = true; studio.cancel = false; studio.jobId = null;
+  if (studio.upload?.file !== state.audioFile) {
+    rStatus(`Передаю звук (${(state.audioFile.size / 1e6).toFixed(0)} МБ)…`);
+    const r = await fetch('/api/audio?name=' + encodeURIComponent(state.audioFile.name), { method: 'POST', body: state.audioFile });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error);
+    studio.upload = { file: state.audioFile, ...j };
+  }
+  state.duration = studio.upload.T;
+  const T = durationOf(), total = Math.ceil(T * fps - 1e-9), range = $('rRange').value;
+  const start = range === 'here' ? Math.min(total - 1, frameIndex(clock.t)) : 0;
+  const count = range === 'all' ? total : Math.min(20 * fps, total - start);
+  const bitrate = Math.round(p.bitrate * 1e6), gop = Math.max(1, Math.round(p.gopSec * fps));
+  const sup = await VZ.h264Support(W, H, fps, bitrate);
+  const job = await postJSON('/api/job', { audioId: studio.upload.id, W, H, fps, bitrate, gop, encoder: sup.supported ? 'webcodecs' : 'raw', codec: sup.codec,
+    startFrame: start, count, totalFrames: total, name: baseName() + ' (viz)' });
+  studio.jobId = job.id;
+  document.body.classList.add('exporting'); $('bRender').disabled = true; $('bCancel').hidden = false; $('rBar').hidden = false; $('rBar').value = 0;
+  const head = `${W}×${H}, ${fps} fps · ${job.desc} · звук: ${job.audio}`;
+  window.__vsProgress = ({ done, total, sec }) => {
+    const rate = done / sec, eta = (total - done) / rate;
+    $('rBar').value = done / total; drawTimelineTop((start + done) / fps);
+    rStatus(`${(100 * done / total).toFixed(1)} % · ${done} из ${total} кадров · ${rate.toFixed(0)} кадр/с (×${(rate / fps).toFixed(1)}) · осталось ≈ ${Math.floor(eta / 60)} мин ${Math.round(eta % 60)} с\n${head}`);
+  };
+  try {
+    await VZ.exportRun({ mode: sup.supported ? 'webcodecs' : 'raw', codec: sup.codec, hardwareAcceleration: sup.hardwareAcceleration,
+      bitrate, gop, start, count, sinkUrl: `/api/job/${job.id}/data`, shouldStop: () => studio.cancel });
+    rStatus('Кадры готовы, ffmpeg дописывает файл и проверяет звук…');
+    const r = await postJSON(`/api/job/${job.id}/finish`, {});
+    $('rReport').textContent = r.out + '\n' + r.lines.join('\n'); $('rReport').hidden = false;
+    $('bReveal').hidden = false; studio.lastJob = job.id;
+    rStatus(r.ok ? 'Готово, все проверки прошли.' : 'Готово, но есть замечания в отчёте ниже.', r.ok ? 'ok' : 'warn');
+  } catch (e) {
+    if (studio.cancel) rStatus('Отменено, недоделанный файл удалён.');
+    else { await fetch(`/api/job/${job.id}/cancel`, { method: 'POST' }).catch(() => { }); throw e; }
+  } finally {
+    window.__vsProgress = null; studio.jobId = null;
+    document.body.classList.remove('exporting'); $('bRender').disabled = false; $('bCancel').hidden = true;
+    redraw();
+  }
+}
+
+function initUI() {
+  buildControls();
+  try { const saved = JSON.parse(localStorage.getItem('vinyl-spin:viz') || 'null'); if (saved) for (const k of Object.keys(VDEF)) if (k in saved) state.p[k] = saved[k]; } catch (e) { }
+  syncControls(); updateLogoDrop();
+  $('stGpu').textContent = 'GPU: ' + R.gpu;
+  document.querySelectorAll('.drop').forEach(drop => {
+    const kind = drop.dataset.kind, inp = drop.querySelector('input');
+    const go = (f) => setFile(kind, f).catch(e => alert(e.message));
+    inp.onchange = () => inp.files[0] && go(inp.files[0]);
+    drop.querySelector('.x').onclick = (e) => { e.preventDefault(); e.stopPropagation(); inp.value = ''; go(null); };
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+    drop.ondragleave = () => drop.classList.remove('over');
+    drop.ondrop = (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); document.body.classList.remove('dragging'); const f = e.dataTransfer.files[0]; if (f) go(f); };
+  });
+  let dragDepth = 0;
+  window.addEventListener('dragenter', () => { dragDepth++; document.body.classList.add('dragging'); });
+  window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => {
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+    const f = e.dataTransfer.files[0]; if (!f) return;
+    if (/json$/i.test(f.name)) f.text().then(t => applyPreset(JSON.parse(t)));
+    else if (f.type.startsWith('audio') || /\.(wav|aiff?|flac|mp3|m4a)$/i.test(f.name)) setFile('audio', f);
+    else if (f.type.startsWith('image')) setFile('logo', f);
+  });
+  $('bPlay').onclick = () => play(!clock.playing);
+  $('bStart').onclick = () => setT(0);
+  $('bBack').onclick = () => setT(currentT() - 10);
+  $('bFwd').onclick = () => setT(currentT() + 10);
+  $('bPrevF').onclick = () => { play(false); setT((frameIndex(clock.t) - 1) / state.p.fps); };
+  $('bNextF').onclick = () => { play(false); setT((frameIndex(clock.t) + 1) / state.p.fps); };
+  $('bNextSec').onclick = () => { if (!state.m) return; const i = upper(state.m.secT, currentT() + state.p.syncMs / 1000 + 0.01); if (i < state.m.sections.length) setT(state.m.sections[i].t - 2 * state.m.beatLen); };
+  $('seekbar').oninput = (e) => setT(+e.target.value);
+  const tlSeek = (e) => { if (!state.m) return; const r = $('tl').getBoundingClientRect(); setT((e.clientX - r.left) / r.width * state.m.duration); };
+  $('tl').onmousedown = (e) => { tlSeek(e); const mv = (ev) => tlSeek(ev), up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); };
+  audio.onended = () => play(false);
+  window.addEventListener('resize', () => { drawTimelineBase(); drawTimelineTop(currentT()); });
+  window.addEventListener('keydown', (e) => {
+    if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName) && e.target.type !== 'range') return;
+    if (e.code === 'Space') { e.preventDefault(); play(!clock.playing); }
+    else if (e.code === 'ArrowLeft') { e.preventDefault(); e.shiftKey ? $('bBack').click() : $('bPrevF').click(); }
+    else if (e.code === 'ArrowRight') { e.preventDefault(); e.shiftKey ? $('bFwd').click() : $('bNextF').click(); }
+    else if (e.code === 'Home') setT(0);
+    else if (e.code === 'PageDown') $('bNextSec').click();
+  });
+  $('halfRes').onchange = (e) => { state.previewScale = e.target.checked ? 0.5 : 1; redraw(); };
+  $('bPng').onclick = () => { state.fullRes = true; seek(currentT()); const url = cv.toDataURL('image/png'); state.fullRes = false; download(url, `${baseName()}-${frameIndex(currentT())}.png`); redraw(); };
+  $('bSave').onclick = savePreset;
+  $('presetIn').onchange = (e) => { const f = e.target.files[0]; if (f) f.text().then(t => applyPreset(JSON.parse(t))).catch(err => alert('Не читается пресет: ' + err.message)); e.target.value = ''; };
+  $('bReset').onclick = () => { if (confirm('Вернуть все параметры по умолчанию?')) applyPreset({ params: VDEF }); };
+  drawTimelineBase(); setT(0);
+  ready.then(() => redraw());
+  detectStudio();
+}
+
+if (RENDER_MODE) document.body.classList.add('render');
+else initUI();
+</script>
+</body>
+</html>
