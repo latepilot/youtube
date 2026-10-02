@@ -143,7 +143,7 @@ const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
   scenes: 'auto', seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
-  blk: 13, grain: 0.05,
+  blk: 13, grain: 0.05, ascii: 0.35, glitch: 1, ca: 1, morphBars: 4,
   kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1,
   syncMs: 0, bpmFix: 0, gridShiftMs: 0,
   logoMode: 'none', logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
@@ -163,6 +163,10 @@ const SCHEMA = [
     { key: 'gold', label: 'Золотой (линии в «кольцах»)', type: 'color' },
     { key: 'blk', label: 'Размер «пикселя» пятен, px при 1080p', min: 4, max: 40, step: 0.5 },
     { key: 'grain', label: 'Зерно', min: 0, max: 0.2, step: 0.001 },
+    { key: 'ascii', label: 'ASCII: сколько кадра пересобирать символами', min: 0, max: 1, step: 0.01 },
+    { key: 'glitch', label: 'Глитч: сдвиги строк и блоков', min: 0, max: 2, step: 0.01 },
+    { key: 'ca', label: 'Хроматическая аберрация', min: 0, max: 3, step: 0.01 },
+    { key: 'morphBars', label: 'Перетекание стилей, тактов', min: 1, max: 16, step: 1 },
   ]},
   { title: 'Реакция на трек', open: true, items: [
     { key: 'kickAmt', label: 'Кик: пятна, кольца, прогиб линий', min: 0, max: 2, step: 0.01 },
@@ -584,7 +588,7 @@ const FS_MAIN = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes;
 uniform int uSceneA, uSceneB; uniform float uMix; uniform vec4 uSeedA, uSeedB;
-uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uStab, uTension, uFlash, uDropAge, uBeat, uTime, uBlk;
+uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uStab, uTension, uFlash, uDropAge, uBeat, uBar, uTime, uBlk, uTone;
 uniform float uKickAmt, uStabAmt, uHatAmt;
 uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed, -
 uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, номер эха, seed
@@ -653,7 +657,7 @@ vec3 sceneTrio(vec2 p, vec4 sd){
   float st = min(1.2, uStab) * uStabAmt;
   float vR = (gau(dq, vec2(-0.06, 0.0), vec2(0.03, 0.024)) + gau(dq, vec2(0.065, 0.0), vec2(0.028, 0.03))) * (0.15 + 0.95 * st);
   col = mix(col, hot(vR), blockMask(vR, dq, 4u) * smoothstep(0.1, 0.3, vR));
-  float rho = length(d), th = atan(d.y, d.x);
+  float rho = length(d), th = atan(d.y, d.x) + 0.18 * sin(uTime * 0.13 + sd.x * 6.0);
   float wob = 0.012 * sin(th * 3.0 + uTime * 0.4 + sd.y * 6.0) * (0.4 + uMid);
   // скруглённый ромб: выступы вверх-вниз-влево-вправо, между ними прогиб; середина трека его раскачивает
   float rO = 0.27 * (1.0 + 0.05 * cos(2.0 * th) + (0.13 + 0.05 * uMid) * cos(4.0 * th)) + wob;
@@ -777,7 +781,7 @@ vec3 sceneRings(vec2 p, vec4 sd){
   col = mix(col, uRed, min(1.0, vr * 1.3));
   // дуги: золотые постоянные, белые серпы — эхо аккордов
   float rho = length(p), th = atan(p.y, p.x);
-  float open = smoothstep(0.62, 0.5, cos(th));    // справа разрыв — там волна
+  float open = smoothstep(0.62, 0.5, cos(th + 0.25 * sin(uTime * 0.09)));    // справа разрыв — там волна
   for (int i = 0; i < 3; i++) { float r = float[3](0.32, 0.25, 0.178)[i] * (1.0 + 0.01 * uLowSlow); col = mix(col, uGold, ring(p, vec2(0.0), r, LW * 1.3) * open); }
   for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
     float a = s.y * exp(-s.x / 1.0) * uStabAmt * smoothstep(0.0, 0.03, s.x);
@@ -854,40 +858,119 @@ vec3 sceneField(vec2 p, vec4 sd){
 }
 
 vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : sceneField(p, sd); }
+// мелкие детали поверх любой сцены: полоска-спектр, развёртка по такту, спутники, метки по углам
+vec3 details(vec3 c, vec2 p){
+  vec3 lc = mix(vec3(0.9, 0.89, 0.85), vec3(0.08, 0.08, 0.07), uTone);
+  float hw = uRes.x / uRes.y * 0.5;
+  // спектр-история: 96 столбиков из прошедших 3 секунд, у самого низа кадра
+  if (p.y < -0.375 && p.y > -0.44 && abs(p.x) < 0.6) {
+    float u = (p.x + 0.6) / 1.2, ci = floor(u * 96.0), uc = (ci + 0.5) / 96.0;
+    vec4 w = wave(uc * 0.5);
+    float hgt = 0.004 + 0.05 * (0.5 * w.g + 0.3 * w.b + 0.2 * w.a);
+    float inBar = step(abs(fract(u * 96.0) - 0.5), 0.28);
+    float on = inBar * step(p.y, -0.44 + hgt);
+    vec3 bc = mix(uBlue, uRed, step(0.5, w.b - w.g + 0.4));
+    c = mix(c, mix(lc, bc, 0.35 + 0.4 * w.a), on * 0.8);
+  }
+  // развёртка: тонкая вертикаль проходит кадр за такт
+  float sx = mix(-hw, hw, uBar);
+  c = mix(c, lc, (1.0 - smoothstep(0.0, PX * 1.2, abs(p.x - sx))) * 0.12);
+  // спутники вокруг центра — оборот за такт
+  for (int i = 0; i < 3; i++) {
+    float a = uBar * TAU + float(i) * TAU / 3.0 + uTime * 0.05;
+    vec2 sp = vec2(cos(a), sin(a)) * vec2(0.36, 0.34);
+    c = mix(c, i == 0 ? uRed : lc, box(p, sp, vec2(0.0035)) * 0.85);
+  }
+  // метки совмещения по углам
+  for (int i = 0; i < 4; i++) {
+    vec2 cp = vec2((i % 2 == 0 ? -1.0 : 1.0) * (hw - 0.05), (i < 2 ? 1.0 : -1.0) * 0.45);
+    c = mix(c, lc, max(seg(p, cp - vec2(0.012, 0.0), cp + vec2(0.012, 0.0), LW), seg(p, cp - vec2(0.0, 0.012), cp + vec2(0.0, 0.012), LW)) * 0.6);
+  }
+  return c;
+}
 void main(){
   PX = 1.0 / uRes.y; LW = max(0.55 * PX, 0.75 / 1080.0);
-  vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+  vec2 p0 = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+  // кадр дышит: медленный зум и крен от низов, толчок на кик
+  float zoom = 1.0 + 0.025 * uLowSlow + 0.018 * min(uKick, 1.0) * uKickAmt + 0.012 * sin(uTime * 0.11);
+  float rot = 0.012 * sin(uTime * 0.07) + 0.004 * uSpring * uKickAmt;
+  vec2 p = mat2(cos(rot), sin(rot), -sin(rot), cos(rot)) * p0 / zoom + vec2(0.006 * sin(uTime * 0.13), 0.004 * cos(uTime * 0.09));
   vec3 c = scene(uSceneA, p, uSeedA);
-  if (uMix > 0.0) c = mix(c, scene(uSceneB, p, uSeedB), uMix);
-  // дроп: из центра расходится тонкая ударная волна и гаснет за полсекунды
+  if (uMix > 0.0) {
+    // стили перетекают: блоки растворяются вслед за бегущей волной, на кромке — цветной глитч
+    vec3 b = scene(uSceneB, p, uSeedB);
+    vec2 bc = floor(p0 / vec2(0.045, 0.03));
+    float mask = 0.5 * hc(bc, 77u) + 0.5 * (p0.x / 1.8 + 0.5 + 0.15 * sin(p0.y * 9.0 + uTime));
+    float th = uMix * 1.3 - 0.15;
+    float w = 1.0 - smoothstep(th - 0.04, th + 0.04, mask);
+    c = mix(c, b, w);
+    float edge = 1.0 - smoothstep(0.0, 0.05, abs(mask - th));
+    c = mix(c, hc(bc, 79u) < 0.5 ? uBlue : uRed, edge * 0.55 * step(0.35, hc(bc, 81u)));
+  }
+  c = details(c, p);
+  // дроп: из центра расходится тонкая ударная волна
   if (uFlash > 0.0) {
     float r = uDropAge * 1.5, w = 0.002 + uDropAge * 0.01;
-    float a = uFlash * (1.0 - smoothstep(w - PX, w + PX, abs(length(p) - r)));
-    c = mix(c, vec3(1.0), a);
+    c = mix(c, vec3(1.0), uFlash * (1.0 - smoothstep(w - PX, w + PX, abs(length(p0) - r))));
     c += 0.06 * uFlash;
   }
   o = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
-// проход 2: зерно и логотип поверх сцены
+// проход 2: глитч (сдвиги строк и блоков), хроматическая аберрация, ASCII-полосы, развёртка, зерно, логотип
 const FS_PRINT = `#version 300 es
 precision highp float; precision highp int;
-uniform vec2 uRes; uniform sampler2D uScene;
-uniform float uGrain; uniform uint uFrame, uSeed;
+uniform vec2 uRes; uniform sampler2D uScene, uGlyphs;
+uniform float uGrain, uTone, uMix, uAscii, uGlitch, uCA, uKick, uKickAmt, uTime; uniform vec3 uBgA, uBgB; uniform uint uFrame, uSeed, uGlitchSeed, uAsciiSeed;
 uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
 out vec4 o;
+const float NG = 11.0;   // символов в атласе: от пустого к плотному
 uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; return v; }
+float h2(vec2 c, uint k){ return float(pcg3d(uvec3(uvec2(ivec2(floor(c)) + 32768), k)).x) * (1.0 / 4294967295.0); }
 float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
+vec3 tap(vec2 f){ return texture(uScene, f / uRes).rgb; }
 void main(){
   vec2 frag = gl_FragCoord.xy;
-  float H = uRes.y;
-  vec3 col = texelFetch(uScene, ivec2(frag), 0).rgb;
+  float H = uRes.y, u1 = H / 1080.0;
+  vec2 sp = frag;
+  // глитч: горизонтальные полосы сдвигаются, отдельные блоки повторяют соседей
+  float g = uGlitch;
+  if (g > 0.01) {
+    float bh = (5.0 + 40.0 * h2(vec2(floor(frag.y / (48.0 * u1)), 0.0), uGlitchSeed)) * u1;
+    float band = floor(frag.y / bh);
+    if (h2(vec2(band, 1.0), uGlitchSeed) < 0.22 * g) sp.x += (h2(vec2(band, 2.0), uGlitchSeed) - 0.5) * 0.18 * H * g;
+    vec2 blk = floor(frag / (36.0 * u1));
+    if (h2(blk, uGlitchSeed + 3u) < 0.06 * g) sp = (blk + vec2(h2(blk, uGlitchSeed + 4u) * 4.0 - 2.0, 0.0)) * 36.0 * u1 + mod(frag, 36.0 * u1);
+  }
+  // хроматическая аберрация: каналы расходятся к краям кадра, сильнее на кик и в глитче
+  vec2 dir = (frag - 0.5 * uRes) / H;
+  float ca = (uCA * (1.0 + 0.8 * min(uKick, 1.0) * uKickAmt) + 0.008 * g) * H;
+  vec3 col = vec3(tap(sp + dir * ca).r, tap(sp).g, tap(sp - dir * ca).b);
+  // ASCII: полосы клеток пересобираются из символов по яркости
+  vec2 cs = vec2(9.0, 16.0) * u1, cell = floor(frag / cs);
+  float bandOn = step(h2(vec2(floor(cell.y / 4.0), 7.0), uAsciiSeed), uAscii);
+  float trans = 4.0 * uMix * (1.0 - uMix);
+  float cellOn = max(bandOn, step(h2(cell, uAsciiSeed + 11u), trans * 0.55));
+  if (cellOn > 0.5) {
+    vec2 cc = (cell + 0.5) * cs, inC = (frag - cell * cs) / cs;
+    vec3 cc3 = tap(cc);
+    // плотность символа — насколько клетка отличается от фона сцены (обеих сцен при перетекании): пустой фон остаётся фоном
+    float v = min(length(cc3 - uBgA), length(cc3 - uBgB)) * 1.5;
+    vec3 bgc = length(cc3 - uBgA) < length(cc3 - uBgB) ? uBgA : uBgB;
+    float gi = floor(clamp(v, 0.0, 0.999) * NG);
+    float glyph = texture(uGlyphs, vec2((gi + clamp(inC.x, 0.05, 0.95)) / NG, 1.0 - inC.y)).r;
+    float lt = step(0.5, dot(bgc, vec3(0.333)));
+    vec3 fg = mix(max(cc3 * 1.2, vec3(0.25)), cc3 * 0.7, lt);
+    col = mix(bgc, fg, glyph);
+  }
+  // развёртка и лёгкая виньетка
+  col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1)));
+  col *= 1.0 - 0.18 * smoothstep(0.55, 1.1, length(dir * vec2(0.85, 1.0)));
   vec2 pix = vec2(frag.x, uRes.y - frag.y);
   if (uHasLogo == 1) {
     vec2 lu = (pix - uLogoRect.xy) / uLogoRect.zw;
-    if (all(greaterThanEqual(lu, vec2(0.0))) && all(lessThan(lu, vec2(1.0)))) { vec4 l = texture(uLogo, lu) * uLogoOpacity; col = col * (1.0 - l.a) + l.rgb; }
+    if (all(greaterThanEqual(lu, vec2(0.0))) && all(lessThan(lu, vec2(1.0)))) { vec4 lg = texture(uLogo, lu) * uLogoOpacity; col = col * (1.0 - lg.a) + lg.rgb; }
   }
-  // зерно: мельче на тёмном, как на плёнке; чуть сильнее в средних тонах
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
   if (uGrain > 0.0) col += uGrain * (0.55 + 0.9 * l * (1.0 - l)) * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.4))), uFrame);
   o = vec4(clamp(col, 0.0, 1.0), 1.0);
@@ -917,8 +1000,8 @@ void main(){
   o = r;
 }`;
 
-const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3' };
+const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -931,7 +1014,13 @@ class Renderer {
     this.vao = gl.createVertexArray();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
-    this.logoTex = this.makeTex(); this.waveTex = this.makeTex();
+    this.logoTex = this.makeTex(); this.waveTex = this.makeTex(); this.glyphTex = this.makeTex();
+    // атлас ASCII: символы от пустого к плотному, белым по чёрному
+    const GL = ' .,:-=+*%#@', gw = 32, gh = 56, gc = document.createElement('canvas'); gc.width = gw * GL.length; gc.height = gh;
+    const gx = gc.getContext('2d'); gx.fillStyle = '#000'; gx.fillRect(0, 0, gc.width, gh);
+    gx.fillStyle = '#fff'; gx.font = 'bold 46px Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace'; gx.textAlign = 'center'; gx.textBaseline = 'middle';
+    [...GL].forEach((ch, i) => gx.fillText(ch, i * gw + gw / 2, gh / 2 + 2));
+    this.upload(this.glyphTex, gc);
   }
   program(fs) {
     const gl = this.gl;
@@ -995,6 +1084,7 @@ class Renderer {
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.logoTex); gl.uniform1i(u.uLogo, 1);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.sceneTex); gl.uniform1i(u.uScene, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.waveTex); gl.uniform1i(u.uWave, 3);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.glyphTex); gl.uniform1i(u.uGlyphs, 4);
     gl.uniform2f(u.uRes, this.W, this.H);
     for (const [name, v] of Object.entries(s.U)) {
       const loc = u[name]; if (!loc) continue;
@@ -1053,6 +1143,19 @@ function sceneOfSection(s) {
   if (s.kick) return n % 2 ? 2 : 0;
   return s.type === 'intro' ? 1 : s.type === 'outro' ? 3 : (n % 2 ? 1 : 3);
 }
+// отрезки стиля: секция делится на куски по 16 тактов, соседние куски — разные сцены одного тона
+function styleSegments(m) {
+  const key = state.p.scenes + '|' + state.p.seed;
+  if (m.segCache && m.segCache.key === key) return m.segCache;
+  const bar = 4 * m.beatLen, t = [], s = [];
+  m.sections.forEach((sec, i) => {
+    const base = sceneOfSection(sec), alt = state.p.scenes === 'auto' ? (base + 2) % 4 : base;
+    const end = i + 1 < m.sections.length ? m.sections[i + 1].t : m.duration;
+    for (let k = 0, tt = sec.t; tt < end - 4 * bar || k === 0; k++, tt += 16 * bar) { t.push(tt); s.push({ scene: k % 2 ? alt : base, seed: seedOfSection(i * 31 + k), trans: k === 0 ? sec.trans : 'shift' }); }
+  });
+  m.segCache = { key, t: Float64Array.from(t), s };
+  return m.segCache;
+}
 function seedOfSection(i) { const s = state.p.seed, r = (k) => hash01(s * 7919 + i, k); return [r(1), r(2), r(3), Math.floor(r(4) * 1000)]; }
 function fmt(t) { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + s.toFixed(2).padStart(5, '0'); }
 const WAVE_COLS = 256, WAVE_SPAN = 6;   // «волна» в кадре: 6 с вокруг текущего момента
@@ -1065,16 +1168,38 @@ function frameState(t) {
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
     uKicks: new Float32Array(24), uStabs: new Float32Array(48), uHats: new Float32Array(16), uKickN: 0, uStabN: 0, uHatN: 0,
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
-    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity };
+    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
   if (!m) return st;
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
-  // смена сцены: на дропе — склейка со вспышкой, в остальных случаях растворение за долю
-  U.uSceneA = sceneOfSection(sec); U.uSeedA = seedOfSection(si);
-  if (prev && sec.trans !== 'drop') {
-    const u = (ts - sec.t) / m.beatLen;
-    if (u < 1) { U.uSceneB = U.uSceneA; U.uSeedB = U.uSeedA; U.uSceneA = sceneOfSection(prev); U.uSeedA = seedOfSection(si - 1); U.uMix = u * u * (3 - 2 * u); }
-  }
+  // стили перетекают: на границах секций и каждые 16 тактов внутри секции — к соседней сцене того же тона
+  const segs = styleSegments(m), bar = 4 * m.beatLen;
+  let j = Math.max(0, upper(segs.t, ts) - 1);
+  const D = (k) => Math.min((segs.s[k].trans === 'drop' ? 1 : p.morphBars) * bar, (segs.t[k] - (segs.t[k - 1] ?? -1e9)) / 2, ((segs.t[k + 1] ?? 1e9) - segs.t[k]) / 2);
+  let from = j, to = j, u = 0;
+  if (j > 0 && ts < segs.t[j] + D(j) / 2) { from = j - 1; to = j; u = (ts - (segs.t[j] - D(j) / 2)) / D(j); }
+  else if (j + 1 < segs.t.length && ts > segs.t[j + 1] - D(j + 1) / 2) { from = j; to = j + 1; u = (ts - (segs.t[j + 1] - D(j + 1) / 2)) / D(j + 1); }
+  u = Math.min(1, Math.max(0, u)); u = u * u * (3 - 2 * u);
+  U.uSceneA = segs.s[from].scene; U.uSeedA = segs.s[from].seed; U.uSceneB = segs.s[to].scene; U.uSeedB = segs.s[to].seed;
+  U.uMix = from === to ? 0 : u;
+  const tone = (k) => k % 2 === 1 ? 1 : 0;
+  U.uTone = tone(U.uSceneA) * (1 - U.uMix) + tone(U.uSceneB) * U.uMix;
+  const BG = [[0.065, 0.066, 0.054], [0.885, 0.876, 0.862], [0.07, 0.064, 0.036], [0.925, 0.925, 0.918]];
+  U.uBgA = BG[U.uSceneA]; U.uBgB = BG[U.uSceneB];
+  if (m.grid) { const bp = ((ts - m.beat0) / m.beatLen - m.barPhase) / 4; U.uBar = bp - Math.floor(bp); }
+  // ASCII: полосы меняются на каждой доле; на брейках больше, в грувах меньше; хэты и верх добавляют
+  const beatIdx = m.grid ? Math.floor((ts - m.beat0) / m.beatLen) : Math.floor(ts * 2);
+  const secK = { break: 1, intro: 0.75, outro: 0.75, groove: 0.45 }[sec.type] ?? 0.5;
+  U.uAscii = Math.min(1, p.ascii * secK * (0.5 + sample(m.env.high, ts, 1 / 255)) + 0.15 * p.ascii * Math.min(1, envSum(m.hats, ts, 0.07, 0.5)));
+  U.uAsciiSeed = (beatIdx * 2654435761 + p.seed) >>> 0;
+  // глитч: сильные аккорды (начало цепочки эха), дроп, середина перетекания
+  let gl = 0, gs = 0;
+  for (const i of recentEvents(m.stabs, ts, 0.6, 8)) if (m.stabEcho[i] === 0 && m.stabs.s[i] > 0.6) { const e = m.stabs.s[i] * Math.exp(-(ts - m.stabs.t[i]) / 0.12); if (e > gl) { gl = e; gs = i; } }
+  const dg = sec.trans === 'drop' && ts >= sec.t ? Math.exp(-(ts - sec.t) / 0.3) : 0;
+  gl = Math.max(gl * 0.8, dg, U.uMix * (1 - U.uMix) * 1.6);
+  U.uGlitch = Math.min(1.2, gl * p.glitch);
+  U.uGlitchSeed = ((gs + 1) * 2246822519 + Math.floor(ts * 12.5) * 3266489917) >>> 0;
+  U.uCA = 0.0015 * p.ca;
   U.uTension = tensionAt(m, ts);
   U.uFlash = Math.min(1, dropAt(m, ts, 0.5) * p.flashAmt); U.uDropAge = sec.trans === 'drop' ? ts - sec.t : 99;
   if (m.grid) { const bp = (ts - m.beat0) / m.beatLen; U.uBeat = bp - Math.floor(bp); }
