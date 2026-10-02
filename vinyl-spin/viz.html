@@ -719,22 +719,32 @@ vec3 sceneSheet(vec2 p, vec4 sd){
   col = mix(col, ink, seg(p, vec2(hw - 0.205, -0.345), vec2(hw - 0.155, -0.345), LW));
   // ось через весь лист
   col = mix(col, ink, seg(p, vec2(-hw + 0.16, 0.0), vec2(hw - 0.16, 0.0), LW) * 0.9);
-  // волна трека: тонкие вертикальные штрихи, сердцевина синяя, середина тёмная, край оранжевый
+  // волна трека как на экране Elektron Digitakt: крупные «пиксели» дисплея, тонкий контур одним цветом.
+  // Внешний контур — вся громкость, внутренний пунктир — низ, по центру — нулевая линия и метка «сейчас»
   float x0 = -0.268, x1 = 0.324;
-  if (p.x > x0 - 0.01 && p.x < x1 + 0.03) {
-    float u = (p.x - x0) / (x1 - x0);
-    float sw = max(2.6 * PX, 0.0026);
-    float ci = floor((p.x - x0) / sw), uc = ((ci + 0.5) * sw) / (x1 - x0);
-    vec4 w = wave(uc);
-    float taper = smoothstep(0.0, 0.18, uc) * smoothstep(1.0, 0.8, uc);
-    float A = (0.02 + 0.24 * w.r * w.r + 0.05 * w.g) * (0.35 + 0.65 * taper) * (0.92 + 0.16 * hc(vec2(ci, 1.0), 21u));
-    float t = abs(p.y) / max(A, 1e-4);
-    float stripe = 1.0 - smoothstep(0.32, 0.5, abs(fract((p.x - x0) / sw) - 0.5) * 2.0 * 0.5 + 0.25);
-    vec3 c = mix(vec3(1.0), uBlue, smoothstep(0.02, 0.18, t));
-    c = mix(c, ink, smoothstep(0.38 + 0.25 * w.g, 0.62 + 0.2 * w.g, t));
-    c = mix(c, orange, smoothstep(0.6 + 0.15 * w.g, 0.8 + 0.1 * w.g, t));
-    float a = (1.0 - smoothstep(0.78, 1.02, t)) * smoothstep(-0.05, 0.02, u) * smoothstep(1.08, 0.98, u);
-    col = mix(col, c, a * mix(0.55, 1.0, stripe) * clamp(0.6 + 0.6 * taper, 0.0, 1.0));
+  if (p.x > x0 - 0.01 && p.x < x1 + 0.01 && abs(p.y) < 0.33) {
+    float dp = max(3.0 * PX, 0.0028);
+    vec2 pc = floor(vec2(p.x - x0, p.y) / dp), pf = fract(vec2(p.x - x0, p.y) / dp);
+    float on = 0.0, nc = floor((x1 - x0) / dp);
+    if (pc.x >= 0.0 && pc.x < nc) {
+      float yy = pc.y >= 0.0 ? pc.y : -pc.y - 1.0;            // зеркально вверх и вниз
+      vec2 a = vec2(0.0), lo = vec2(0.0);
+      for (int k = 0; k < 2; k++) {
+        float uc = (pc.x - float(k) + 0.5) / nc;
+        vec4 w = 0.25 * (wave(uc - 1.5 / 256.0) + wave(uc + 1.5 / 256.0)) + 0.5 * wave(uc);   // чуть сгладить, как у дисплея
+        float taper = smoothstep(0.0, 0.12, uc) * smoothstep(1.0, 0.88, uc);
+        a[k] = floor((0.012 + 0.15 * w.r * w.r + 0.035 * w.g) * (0.4 + 0.6 * taper) / dp);
+        lo[k] = min(a[k] - 3.0, floor((0.006 + 0.13 * w.g * w.g) * (0.4 + 0.6 * taper) / dp));
+      }
+      if (pc.x < 1.0) { a.y = a.x; lo.y = lo.x; }
+      // контур: столбец закрашен от прошлой высоты до текущей, так линия не рвётся на перепадах
+      on = step(min(a.x, a.y), yy) * step(yy, max(a.x, a.y));
+      on = max(on, step(min(lo.x, lo.y), yy) * step(yy, max(lo.x, lo.y)) * step(0.0, lo.x) * step(0.5, mod(pc.x, 2.0)));
+      on = max(on, step(yy, 0.0) * step(0.5, mod(pc.x, 3.0)) * step(-0.5, pc.y) * step(pc.y, 0.5));
+      on = max(on, step(abs(pc.x - floor(nc * 0.5)), 0.0) * step(mod(yy, 3.0), 0.5) * step(yy, a.x + 3.0));
+    }
+    on *= step(pf.x, 0.82) * step(pf.y, 0.82);                // зазор между пикселями, как у OLED
+    col = mix(col, ink, on * 0.92);
   }
   // слева: пятно (синее ядро, оранжевый ореол) и кольца — на каждый кик новое
   vec2 cL = vec2(-0.458, 0.0);
