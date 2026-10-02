@@ -149,7 +149,7 @@ async function testStudio() {
     const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
     const errs = []; page.on('pageerror', e => errs.push(e.message));
     await page.goto(url + 'viz.html');
-    await page.evaluate(() => VZ.setParams({ res: '640x360' })   // малое разрешение: в контейнере без GPU кадр рисуется секундами);
+    await page.evaluate(() => VZ.setParams({ res: '640x360' }));   // малое разрешение: в контейнере без GPU кадр рисуется секундами
     await page.setInputFiles('.drop[data-kind=audio] input', track);
     await page.waitForFunction(() => /Готово/.test(document.getElementById('anStatus').textContent), null, { timeout: 120000 });
     console.log('  ' + (await page.textContent('#anStatus')).replace(/\n/g, ' '));
