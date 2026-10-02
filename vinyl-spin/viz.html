@@ -1177,10 +1177,6 @@ vec3 xerox(vec2 f, float u1){
   // пыль и точки тонера
   if (h2(f / (2.0 * u1), fr + 41u) < 0.0012) toner = 1.0;
   if (h2(f / (1.0 * u1), fr + 43u) < 0.02 * toner) toner = 0.0;
-  // тень от крышки по краям листа
-  vec2 uv = f / uRes;
-  float edge = max(smoothstep(0.035, 0.0, uv.x), smoothstep(0.965, 1.0, uv.x)) * (0.6 + 0.4 * vnoise(vec2(f.y / (40.0 * u1), 1.0), uLayoutSeed));
-  toner = max(toner, edge);
   return mix(PAPER, TONER, toner);
 }
 float rectF(vec2 f, vec4 r){ return step(r.x, f.x) * step(f.x, r.z) * step(r.y, f.y) * step(f.y, r.w); }
@@ -1235,7 +1231,7 @@ void main(){
 }`;
 
 // проход 4: «плёнка» — VHS (дрожание строк, трекинг, срыв головки, растёкшийся цвет, звон по краям, снег, выпадения),
-// затем развёртка, виньетка, логотип и зерно
+// затем развёртка, логотип и зерно
 const FS_FINAL = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes; uniform sampler2D uSrc;
@@ -1284,10 +1280,8 @@ void main(){
     col *= 1.0 - rollBar;
     col *= 1.0 - 0.1 * v * step(0.5, fract(frag.y / (2.0 * u1)));     // чересстрочная развёртка
   } else col = tap(frag);
-  // развёртка и лёгкая виньетка
-  vec2 dir = (frag - 0.5 * uRes) / H;
+  // развёртка (без виньетки: никакого затемнения по краям)
   col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1)));
-  col *= 1.0 - (0.18 + 0.2 * v) * smoothstep(0.55, 1.1, length(dir * vec2(0.85, 1.0)));
   vec2 pix = vec2(frag.x, uRes.y - frag.y);
   if (uHasLogo == 1) {
     vec2 lu = (pix - uLogoRect.xy) / uLogoRect.zw;
