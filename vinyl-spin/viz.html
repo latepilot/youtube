@@ -22,6 +22,14 @@
   header nav { display: flex; gap: 4px; }
   header nav a, header nav b { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-weight: 500; }
   header nav b { color: #111; background: var(--accent); border-color: var(--accent); }
+  .row label span { display: flex; gap: 8px; }
+  .lfo { font-weight: 400; color: #5d636b; cursor: pointer; }
+  .lfo.on { color: var(--accent); }
+  .lfoBox { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 6px 0 2px; }
+  .lfoBox label { flex-direction: column; font-size: 11px; }
+  .lfoBox output { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+  .lfoAll { align-items: center; margin: 0 0 6px; }
+  .lfoAll span { color: var(--muted); font-size: 12px; margin-right: 4px; }
   .seg { display: flex; gap: 0; margin: 10px 0 6px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { flex: 1; border: 0; border-radius: 0; padding: 8px 6px; font-weight: 600; background: transparent; color: var(--muted); cursor: pointer; }
   .seg button.on { background: var(--accent); color: #111; }
@@ -125,6 +133,7 @@
       </div>
     </details>
     <div id="themeSw" class="seg" title="Тема визуала: свой набор сцен, цветов и эффектов"><button data-t="dub">Даб-техно</button><button data-t="ambient">Эмбиент</button></div>
+    <div class="btns lfoAll"><span>LFO</span><button id="bLfoAll" title="Каждому силовому параметру — своё случайное медленное колебание">Оживить всё</button><button id="bLfoOff">Снять все</button></div>
     <div id="controls"></div>
     <details><summary>Кадр, пресеты</summary>
       <div class="btns">
@@ -145,7 +154,7 @@
    ========================================================================== */
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  theme: 'dub', scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
+  theme: 'dub', lfo: {}, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
@@ -160,10 +169,36 @@ const SCENE_NAMES = ['три прибора (тёмная)', 'лист с вол
 const AMB_SCENE_NAMES = ['мицелий', 'цветок жизни и семена', 'рябь на воде (светлая)', 'туманность и светило', 'лотос', 'метатронов куб', 'торовое поле'];
 // темы: при переключении эти параметры принимают значения темы (потом их можно крутить)
 const THEME_PRESET = {
-  dub: { ascii: 0.5, glitch: 1, ca: 1, fx: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, palSec: 20, digital: 0.8, freeze: 1, games: 'normal', looks: 'auto', grain: 0.05, bloom: 0 },
-  ambient: { ascii: 0, glitch: 0, ca: 0.35, fx: 0.35, styleMin: 12, styleMax: 24, morphSec: 6, palSec: 45, digital: 0, freeze: 0, games: 'off', looks: 'off', grain: 0.04, bloom: 0.7 },
+  dub: { ascii: 0.5, glitch: 1, ca: 1, fx: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, palSec: 20, digital: 0.8, freeze: 1, games: 'normal', looks: 'auto', grain: 0.05, bloom: 0,
+    lfo: { ascii: { depth: 0.35, period: 23, shape: 'random' }, glitch: { depth: 0.25, period: 17, shape: 'random' }, ca: { depth: 0.25, period: 11, shape: 'sine' }, fx: { depth: 0.3, period: 29, shape: 'random' }, grain: { depth: 0.15, period: 13, shape: 'tri' } } },
+  ambient: { ascii: 0, glitch: 0, ca: 0.35, fx: 0.35, styleMin: 12, styleMax: 24, morphSec: 6, palSec: 45, digital: 0, freeze: 0, games: 'off', looks: 'off', grain: 0.04, bloom: 0.7,
+    lfo: { bloom: { depth: 0.3, period: 31, shape: 'random' }, ca: { depth: 0.2, period: 19, shape: 'sine' }, grain: { depth: 0.2, period: 23, shape: 'random' }, fx: { depth: 0.25, period: 41, shape: 'random' } } },
 };
 const themeDefaults = (th) => ({ ...VDEF, ...THEME_PRESET[th] || {}, theme: th });
+// LFO: у каждого «силового» параметра может быть своё медленное колебание вокруг значения ползунка.
+// Глубина — доля диапазона ползунка (±половина), период в секундах, форма: синус, треугольник, плавный случайный.
+// Не модулируются параметры, которые задают структуру (смены сцен, события, seed, рендер): иначе кадр «прыгал» бы.
+const LFO_KEYS = new Set(['grain', 'ascii', 'glitch', 'fx', 'ca', 'bloom', 'digital', 'vhs', 'riso', 'xerox', 'brutal', 'misreg', 'kickAmt', 'hatAmt', 'stabAmt', 'flashAmt', 'blk']);
+const LFO_SHAPES = [['sine', 'синус'], ['tri', 'треугольник'], ['random', 'плавный случайный']];
+function lfoWave(key, l, t, seed) {
+  const kh = [...key].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261) >>> 0;
+  const ph = t / Math.max(0.2, l.period) + hash01(kh, seed);
+  if (l.shape === 'tri') return 1 - 4 * Math.abs(ph - Math.floor(ph) - 0.5);
+  if (l.shape === 'random') { const i = Math.floor(ph), f = ph - i, w = (1 - Math.cos(Math.PI * f)) / 2; return (hash01(kh + i, seed) * (1 - w) + hash01(kh + i + 1, seed) * w) * 2 - 1; }
+  return Math.sin(2 * Math.PI * ph);
+}
+let SCHEMA_ITEM = null;
+function modParams(p, t) {
+  if (!p.lfo) return p;
+  SCHEMA_ITEM ??= Object.fromEntries(SCHEMA.flatMap(sec => sec.items).map(it => [it.key, it]));
+  let q = null;
+  for (const [k, l] of Object.entries(p.lfo)) {
+    const it = SCHEMA_ITEM[k]; if (!l || !(l.depth > 0) || !LFO_KEYS.has(k) || !it) continue;
+    q ??= { ...p };
+    q[k] = Math.min(it.max, Math.max(it.min, p[k] + l.depth * (it.max - it.min) * 0.5 * lfoWave(k, l, t, p.seed)));
+  }
+  return q || p;
+}
 // органические схемы эмбиента: фон, основной, второй, светлый
 const AMB_PALETTES = {
   moss: { name: 'мох и янтарь', c: ['#0f150d', '#7fa35a', '#c9822f', '#efe2bf'] },
@@ -796,6 +831,67 @@ function gameState(m, p, t, aspect) {
 }
 
 /* ==========================================================================
+   Священная геометрия эмбиента (цветок жизни, лотос, метатронов куб, торовое поле) — общий язык:
+   до 48 окружностей (центр, радиус, яркость), линии между первыми 13 центрами, спираль семян, внешние кольца,
+   наклон (тор), обрезка большим кругом, сияние. Переход между двумя такими сценами — не растекание,
+   а метаморфоза: каждая окружность одной фигуры плавно переезжает в окружность другой.
+   ========================================================================== */
+const GEO_IDS = new Set([5, 8, 9, 10]), GEO_N = 48;
+function geoShape(id, a, ctx) {
+  const { pad, lowSlow, flowA, sd } = ctx, C = [];
+  const rot = (x, y, ang) => [x * Math.cos(ang) - y * Math.sin(ang), x * Math.sin(ang) + y * Math.cos(ang)];
+  // tilt, clip, lines, nodes | seeds: cR, maxN, fadeR, weight | rings: r1, r2, w1, w2 | aurora, centerGlow
+  const g = { tilt: 1, clip: 9, lines: 0, nodes: 0, seeds: [0.0118, 1100, 0.42, 0], rings: [0, 0, 0, 0], aur: 0, glow: 0, fill: 0.35, C };
+  if (id === 5) {               // цветок жизни: 19 окружностей на шестиугольной решётке в большом круге, большая спираль семян
+    const br = 1 + 0.05 * lowSlow + 0.025 * Math.sin(a * 0.21), R = 0.105 * br, ang = -flowA * 0.015 + sd[2] * 6;
+    for (let i = 0; i < 19; i++) {
+      const k = i * Math.PI / 3, c = i === 0 ? [0, 0] : i < 7 ? [Math.cos(k), Math.sin(k)] : i < 13 ? [2 * Math.cos(k), 2 * Math.sin(k)] : [1.7320508 * Math.cos(k + Math.PI / 6), 1.7320508 * Math.sin(k + Math.PI / 6)];
+      C.push([...rot(c[0] * R, c[1] * R, ang), R, 1]);
+    }
+    Object.assign(g, { clip: 3 * R, rings: [3 * R, 3.35 * R, 1, 0.6], seeds: [0.0118, 1100, 0.42, 1] });
+  } else if (id === 8) {        // лотос: кольца перекрывающихся окружностей — их пересечения складываются в лепестки
+    const open = 0.55 + 0.35 * pad + 0.08 * Math.sin(flowA * 0.07 + sd[1] * 6), base = flowA * 0.012 + sd[0] * 6;
+    for (let k = 0; k < 4; k++) {
+      const n = 6 + 3 * k, R0 = 0.04 + 0.065 * k * (0.85 + 0.25 * open), L = (0.075 + 0.025 * k) * (0.6 + 0.6 * open);
+      for (let i = 0; i < n; i++) { const an = base + (i + 0.5 * (k % 2)) / n * 2 * Math.PI; const rr = R0 + L * 0.5; C.push([rr * Math.cos(an), rr * Math.sin(an), L * 0.58, 0.85]); }
+    }
+    const rb = 0.37 + 0.02 * open;
+    Object.assign(g, { rings: [rb + 0.025, rb - 0.025, 0.5, 0.5], seeds: [0.0062, 140, 0.09, 1], glow: 0.4, fill: 1 });
+  } else if (id === 9) {        // метатронов куб: 13 окружностей «плода жизни», поворот в объёме, все линии между центрами
+    const R = 0.075 * (1 + 0.06 * pad + 0.03 * lowSlow);
+    const ay = 0.55 * Math.sin(flowA * 0.031 + sd[0] * 6), ax = 0.35 * Math.sin(flowA * 0.023 + sd[1] * 6), az = flowA * 0.01;
+    for (let i = 0; i < 13; i++) {
+      const k = i * Math.PI / 3 + Math.PI / 6, d = i === 0 ? 0 : i < 7 ? 2 : 4;
+      let [x, y] = rot(d * Math.cos(k) * R, d * Math.sin(k) * R, az), z = 0;
+      [x, z] = [x * Math.cos(ay) - z * Math.sin(ay), x * Math.sin(ay) + z * Math.cos(ay)];
+      [y, z] = [y * Math.cos(ax) - z * Math.sin(ax), y * Math.sin(ax) + z * Math.cos(ax)];
+      const s = 1 / (1 + z * 0.6); C.push([x * s, y * s, R, 1]);
+    }
+    Object.assign(g, { lines: 1, nodes: 1 });
+  } else if (id === 10) {       // торовое поле: 28 окружностей с центрами на окружности под наклоном, внутри малый тор навстречу
+    const tilt = 0.42 + 0.12 * Math.sin(flowA * 0.02 + sd[1] * 6), R = 0.15 * (1 + 0.08 * pad + 0.03 * lowSlow);
+    for (let i = 0; i < 28; i++) { const an = i / 28 * 2 * Math.PI + flowA * 0.03, front = 0.55 + 0.45 * Math.sin(an); C.push([R * Math.cos(an), R * Math.sin(an), R, (0.25 + 0.6 * front) * (0.6 + 0.4 * Math.sin(i * 0.9 - flowA * 0.2))]); }
+    for (let i = 0; i < 16; i++) { const an = -i / 16 * 2 * Math.PI - flowA * 0.05; C.push([0.45 * R * Math.cos(an), 0.45 * R * Math.sin(an), 0.45 * R, 0.35]); }
+    Object.assign(g, { tilt, aur: 1, glow: 0.45, fill: 0 });
+  }
+  while (C.length < GEO_N) C.push([0, 0, 0, 0]);
+  return g;
+}
+function geoMix(a, b, e) {
+  const L = (x, y) => x + (y - x) * e;
+  const C = a.C.map((c, i) => { const d = b.C[i];
+    // окружность, которой нет в одной из фигур, рождается из центра другой (или уходит в него)
+    const ca = c[3] > 0 ? c : [d[0] * 0.3, d[1] * 0.3, 0, 0], cd = d[3] > 0 ? d : [c[0] * 0.3, c[1] * 0.3, 0, 0];
+    return ca.map((v, j) => L(v, cd[j])); });
+  return { tilt: L(a.tilt, b.tilt), clip: Math.exp(L(Math.log(a.clip), Math.log(b.clip))), lines: L(a.lines, b.lines), nodes: L(a.nodes, b.nodes),
+    seeds: a.seeds.map((v, i) => L(v, b.seeds[i])), rings: a.rings.map((v, i) => L(v, b.rings[i])), aur: L(a.aur, b.aur), glow: L(a.glow, b.glow), fill: L(a.fill, b.fill), C };
+}
+function geoUniforms(U, g) {
+  U.uGeo = new Float32Array(GEO_N * 4); g.C.forEach((c, i) => U.uGeo.set(c, i * 4));
+  U.uGeoP = [g.tilt, g.clip, g.lines, g.nodes]; U.uGeoS = g.seeds; U.uGeoR = g.rings; U.uGeoX = [g.aur, g.glow, g.fill, 0];
+}
+
+/* ==========================================================================
    WebGL2: сцены (туннель колец, точечное море), растр, второй цвет, зерно, подписи, логотип
    ========================================================================== */
 const VS_SRC = `#version 300 es
@@ -810,7 +906,8 @@ uniform float uKickAmt, uStabAmt, uHatAmt;
 uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed, -
 uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, номер эха, seed
 uniform vec4 uPads[8]; uniform int uPadN;     // долгие события для эмбиента (до 16 с): возраст, сила, seed
-uniform float uPad, uFlowT;                    // медленная огибающая пэда/хвоста и время течения (интеграл скорости)
+uniform float uPad, uFlowT;
+uniform vec4 uGeo[48]; uniform vec4 uGeoP, uGeoS, uGeoR, uGeoX; uniform int uGeoBoth;   // геометрия (см. geoShape)                    // медленная огибающая пэда/хвоста и время течения (интеграл скорости)
 uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, номер, -
 uniform sampler2D uWave;                       // 256 колонок вокруг «сейчас»: r — вся громкость, g — низ, b — середина, a — верх
 uniform vec3 uBlue, uRed, uGold;
@@ -1170,39 +1267,6 @@ vec3 sceneMyc(vec2 p, vec4 sd){
   col += spores(p, mix(uGold, uBlue, 0.3), 0.32);
   return col;
 }
-// 5. Цветок жизни и семена: священная геометрия поверх туманности, спираль семян (золотой угол) дышит
-vec3 sceneFlower(vec2 p, vec4 sd){
-  float br = 1.0 + 0.05 * uLowSlow + 0.025 * sin(uTime * 0.21);
-  float f = fbm5(p * 1.3 + vec2(aT() * 0.02, sd.x * 7.0));
-  vec3 col = uAmbBg + uRed * 0.16 * smoothstep(0.45, 0.95, f) + uBlue * 0.22 * exp(-dot(p, p) * 3.5) * (0.6 + 0.5 * uLowSlow);
-  // спираль семян, как в подсолнухе: n-е семя на радиусе c√n и угле n·137,5°
-  vec2 pr = rot2(aT() * 0.025 + sd.y * 6.0) * p / br;
-  float cR = 0.0118, r = length(pr), n0 = (r / cR) * (r / cR), glow = 0.0;
-  float st = min(uStab, 1.2) * uStabAmt;
-  for (int k = -9; k <= 9; k++) {
-    float n = floor(n0) + float(k); if (n < 1.0 || n > 1100.0) continue;
-    float aa = n * 2.39996323; vec2 pt = cR * sqrt(n) * vec2(cos(aa), sin(aa));
-    float d = length(pr - pt);
-    float wave = pow(0.5 + 0.5 * sin(sqrt(n) * 0.9 - uTime * 1.1), 6.0);
-    float lit = 0.25 + 0.75 * wave + 0.9 * st * exp(-abs(sqrt(n) * cR - 0.06 - 0.25 * fract(uTime * 0.25)) * 30.0);
-    float sz = 0.0022 + 0.0016 * wave;
-    glow += (1.0 - smoothstep(sz * 0.5, sz, d)) * lit + exp(-d / (sz * 2.5)) * 0.07 * lit;
-  }
-  col += glow * mix(uGold, uBlue, smoothstep(0.15, 0.42, r)) * smoothstep(0.48, 0.3, r);
-  // цветок жизни: 19 окружностей на шестиугольной решётке, обрезанные большим кругом
-  float R = 0.105 * br; vec2 fp = rot2(-aT() * 0.015 + sd.z * 6.0) * p;
-  float lines = 0.0;
-  for (int i = 0; i < 19; i++) {
-    vec2 c = i == 0 ? vec2(0.0) : i < 7 ? vec2(cos(float(i) * 1.0472), sin(float(i) * 1.0472))
-           : i < 13 ? 2.0 * vec2(cos(float(i) * 1.0472), sin(float(i) * 1.0472)) : 1.7320508 * vec2(cos(float(i) * 1.0472 + 0.5236), sin(float(i) * 1.0472 + 0.5236));
-    lines += 1.0 - smoothstep(LW * 0.7, LW * 0.7 + PX * 1.2, abs(length(fp - c * R) - R));
-  }
-  lines *= smoothstep(3.0 * R + 0.004, 3.0 * R - 0.004, length(fp));
-  lines += (1.0 - smoothstep(LW, LW + PX * 1.2, abs(length(fp) - 3.0 * R))) + 0.6 * (1.0 - smoothstep(LW, LW + PX * 1.2, abs(length(fp) - 3.35 * R)));
-  col += min(lines, 1.4) * uGold * (0.32 + 0.3 * uMid + 0.4 * st);
-  col += spores(p, uGold, 0.18);
-  return col;
-}
 // 6. Рябь на воде: светлая бумага, изолинии медленного рельефа (как топокарта), капли на аккордах и хэтах
 vec3 sceneTopo(vec2 p, vec4 sd){
   vec3 paper = uAmbPaper, ink = mix(vec3(0.1, 0.11, 0.09), uBlue * 0.45, 0.35);
@@ -1257,103 +1321,65 @@ vec3 hazeBg(vec2 p, vec4 sd){
   float f = fbm5(p * 1.2 + vec2(aT() * 0.02, sd.x * 7.0) + 0.4 * vec2(fbm5(p * 0.7 - aT() * 0.01), 0.0));
   return uAmbBg + uRed * (0.12 + 0.12 * uPad) * smoothstep(0.42, 0.95, f) + uBlue * (0.18 + 0.18 * uPad) * exp(-dot(p, p) * 3.0);
 }
-// 8. Лотос: кольца лепестков-контуров раскрываются на длинных пэдах, в сердцевине — семена, вокруг — пояс точек
-vec3 sceneLotus(vec2 p, vec4 sd){
+
+// Священная геометрия из окружностей (их задаёт JS — см. geoShape): цветок жизни, лотос, метатронов куб, торовое поле
+// и все промежуточные формы метаморфозы между ними
+vec3 sceneGeo(vec2 p, vec4 sd){
   vec3 col = hazeBg(p, sd);
-  float open = 0.55 + 0.35 * uPad + 0.08 * sin(aT() * 0.07 + sd.y * 6.0);
-  vec2 lp = rot2(aT() * 0.012 + sd.x * 6.0) * p;
-  float r = length(lp), a = atan(lp.y, lp.x), lines = 0.0, fill = 0.0;
-  for (int k = 0; k < 4; k++) {
-    float fk = float(k), n = 8.0 + 4.0 * fk, R0 = 0.04 + 0.065 * fk * (0.85 + 0.25 * open);
-    float L = (0.075 + 0.025 * fk) * (0.6 + 0.6 * open);
-    float phi = (fract(a * n / TAU + 0.5 * mod(fk, 2.0) + 0.02 * sin(aT() * 0.1 + fk)) - 0.5) * TAU / n;
-    float edge = R0 + L * pow(max(cos(phi * n * 0.5), 0.0), 0.65);
-    float inP = step(R0, r) * step(r, edge);
-    lines += (1.0 - smoothstep(LW * 0.8, LW * 0.8 + PX * 1.3, abs(r - edge))) * step(R0 - 0.002, r);
-    lines += 0.45 * (1.0 - smoothstep(LW * 0.5, LW * 0.5 + PX, abs(phi) * r)) * inP;          // жилка лепестка
-    fill += inP * smoothstep(R0, edge, r) * (0.5 + 0.5 * sin(fk * 1.7 + aT() * 0.05));
+  float tilt = uGeoP.x, clipR = uGeoP.y;
+  // сияние над тором: вертикальные занавеси колышутся
+  if (uGeoX.x > 0.01) {
+    float cur = fbm5(vec2(p.x * 3.0 + 0.6 * fbm5(p * 1.5 + aT() * 0.02), aT() * 0.03 + sd.x * 5.0));
+    col += mix(uBlue, uRed, smoothstep(0.3, 0.8, cur)) * pow(smoothstep(0.45, 0.9, cur), 2.0) * smoothstep(-0.1, 0.45, p.y) * (0.25 + 0.3 * uPad) * uGeoX.x;
   }
-  col += fill * mix(uBlue, uRed, 0.4) * 0.12 * (0.6 + 0.6 * uPad);
-  col += min(lines, 1.4) * uGold * (0.3 + 0.35 * uPad + 0.25 * uMid);
-  // сердцевина: мелкая спираль семян
-  float cR = 0.0062, n0 = (r / cR) * (r / cR), seeds = 0.0;
-  for (int k = -6; k <= 6; k++) { float n = floor(n0) + float(k); if (n < 1.0 || n > 140.0) continue;
-    float aa = n * 2.39996323; vec2 pt = cR * sqrt(n) * vec2(cos(aa), sin(aa));
-    seeds += 1.0 - smoothstep(0.0012, 0.0024, length(lp - pt)); }
-  col += seeds * uGold * 0.8;
-  // пояс точек и два тонких круга
-  float rb = 0.37 + 0.02 * open, ab = fract(a / TAU * 48.0) - 0.5;
-  col += uGold * 0.55 * (1.0 - smoothstep(0.0015, 0.0028, length(vec2(ab * TAU / 48.0 * r, r - rb))));
-  col += uGold * 0.25 * (ring(lp, vec2(0.0), rb + 0.025, LW) + ring(lp, vec2(0.0), rb - 0.025, LW));
-  col += spores(p, uGold, 0.2);
-  return col;
-}
-// 9. Метатронов куб: 13 кругов «плода жизни» и все линии между центрами, медленно поворачивается в объёме
-vec3 sceneMetatron(vec2 p, vec4 sd){
-  vec3 col = hazeBg(p, sd);
-  float R = 0.075 * (1.0 + 0.06 * uPad + 0.03 * uLowSlow);
-  float ay = 0.55 * sin(aT() * 0.031 + sd.x * 6.0), ax = 0.35 * sin(aT() * 0.023 + sd.y * 6.0), az = aT() * 0.01;
-  vec2 C[13];
-  for (int i = 0; i < 13; i++) {
-    vec2 c = i == 0 ? vec2(0.0) : (i < 7 ? 2.0 : 4.0) * vec2(cos(float(i) * 1.0472 + 0.5236), sin(float(i) * 1.0472 + 0.5236));
-    vec3 q = vec3(rot2(az) * c * R, 0.0);
-    q.xz = rot2(ay) * q.xz; q.yz = rot2(ax) * q.yz;
-    C[i] = q.xy / (1.0 + q.z * 0.6);                              // лёгкая перспектива
+  vec2 q = vec2(p.x, p.y / tilt);
+  float rq = length(q), circ = 0.0, fill = 0.0, nodes = 0.0, rmax = 0.0;
+  float clipM = smoothstep(clipR + 0.004, clipR - 0.004, length(p));
+  for (int i = 0; i < 48; i++) {
+    vec4 c = uGeo[i]; if (c.w < 0.005 || c.z < 0.002) continue;
+    float dc = length(q - c.xy); rmax = max(rmax, length(c.xy) + c.z);
+    circ += (1.0 - smoothstep(LW * 0.7, LW * 0.7 + PX * 1.2, abs(dc - c.z) * tilt)) * c.w;
+    fill += (1.0 - smoothstep(c.z * 0.55, c.z, dc)) * c.w;
+    nodes += exp(-dc * dc / (0.006 * 0.006)) * c.w;
   }
-  float lines = 0.0, circ = 0.0, nodes = 0.0, rmax = 0.0;
-  for (int i = 0; i < 13; i++) {
-    float dc = length(p - C[i]); rmax = max(rmax, length(C[i]));
-    circ += 1.0 - smoothstep(LW * 0.7, LW * 0.7 + PX * 1.2, abs(dc - R));
-    nodes += exp(-dc * dc / (0.006 * 0.006));
-  }
-  // 78 линий: ищем ближайшую и сглаживаем один раз; за пределами фигуры не считаем вовсе
-  if (length(p) < rmax + 0.01) {
+  // перекрытия окружностей светятся сильнее — так из кругов складываются лепестки
+  col += smoothstep(1.0, 3.5, fill) * mix(uBlue, uRed, 0.4) * 0.14 * (0.6 + 0.6 * uPad) * uGeoX.z;
+  col += min(circ, 1.5) * clipM * uGold * (0.32 + 0.28 * uMid + 0.2 * uPad);
+  col += nodes * uGeoP.w * mix(uGold, vec3(1.0), 0.4) * (0.5 + 0.6 * uPad);
+  // линии метатрона между первыми 13 центрами: ближайшая линия, одно сглаживание, вне фигуры не считаем
+  if (uGeoP.z > 0.01 && rq < rmax + 0.01) {
     float dmin = 1e9; int bi = 0, bj = 0;
     for (int i = 0; i < 13; i++) for (int j = i + 1; j < 13; j++) {
-      vec2 pa = p - C[i], ba = C[j] - C[i];
-      float d = length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+      vec2 pa = q - uGeo[i].xy, ba = uGeo[j].xy - uGeo[i].xy;
+      float d = length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0));
       if (d < dmin) { dmin = d; bi = i; bj = j; }
     }
     float wv = 0.5 + 0.5 * sin(float(bi * 13 + bj) * 0.7 - aT() * 0.15);
-    lines = (1.0 - smoothstep(LW * 0.6 - PX * 0.6, LW * 0.6 + PX * 0.6, dmin)) * (0.25 + 0.5 * wv * (0.4 + uPad));
+    col += (1.0 - smoothstep(LW * 0.6 - PX * 0.6, LW * 0.6 + PX * 0.6, dmin * tilt)) * (0.25 + 0.5 * wv * (0.4 + uPad)) * uGeoP.z * mix(uGold, uBlue, 0.3) * 0.8;
   }
-  col += lines * mix(uGold, uBlue, 0.3) * 0.8;
-  col += min(circ, 1.5) * uGold * (0.35 + 0.25 * uMid);
-  col += nodes * mix(uGold, vec3(1.0), 0.4) * (0.5 + 0.6 * uPad);
-  col += spores(p, uGold, 0.22);
-  return col;
-}
-// 10. Торовое поле: круги, чьи центры лежат на круге, — тор под наклоном; вращается, дышит на пэдах; сверху сияние
-vec3 sceneTorus(vec2 p, vec4 sd){
-  vec3 col = uAmbBg;
-  // сияние: вертикальные занавеси, медленно колышутся
-  float cur = fbm5(vec2(p.x * 3.0 + 0.6 * fbm5(p * 1.5 + aT() * 0.02), aT() * 0.03 + sd.x * 5.0));
-  col += mix(uBlue, uRed, smoothstep(0.3, 0.8, cur)) * pow(smoothstep(0.45, 0.9, cur), 2.0) * smoothstep(-0.1, 0.45, p.y) * (0.25 + 0.3 * uPad);
-  float tilt = 0.42 + 0.12 * sin(aT() * 0.02 + sd.y * 6.0), R = 0.15 * (1.0 + 0.08 * uPad + 0.03 * uLowSlow);
-  vec2 q = vec2(p.x, p.y / tilt);
-  float lines = 0.0;
-  for (int i = 0; i < 28; i++) {
-    float a = float(i) / 28.0 * TAU + aT() * 0.03;
-    vec2 c = R * vec2(cos(a), sin(a));
-    float d = abs(length(q - c) - R) * tilt;
-    float front = 0.55 + 0.45 * sin(a);                       // передняя половина ярче
-    lines += (1.0 - smoothstep(LW * 0.6, LW * 0.6 + PX * 1.2, d)) * (0.25 + 0.6 * front) * (0.6 + 0.4 * sin(float(i) * 0.9 - aT() * 0.2));
+  // внешние кольца
+  col += uGold * 0.55 * (uGeoR.z * (1.0 - smoothstep(LW, LW + PX * 1.2, abs(length(p) - uGeoR.x))) + uGeoR.w * (1.0 - smoothstep(LW, LW + PX * 1.2, abs(length(p) - uGeoR.y))));
+  // спираль семян (золотой угол), по ней бежит волна света
+  if (uGeoS.w > 0.01) {
+    vec2 pr = rot2(aT() * 0.025 + sd.y * 6.0) * p;
+    float cR = uGeoS.x, r = length(pr), n0 = (r / cR) * (r / cR), glow = 0.0, st = min(uStab, 1.2) * uStabAmt;
+    for (int k = -9; k <= 9; k++) {
+      float n = floor(n0) + float(k); if (n < 1.0 || n > uGeoS.y) continue;
+      float aa = n * 2.39996323; vec2 pt = cR * sqrt(n) * vec2(cos(aa), sin(aa));
+      float d = length(pr - pt), wave = pow(0.5 + 0.5 * sin(sqrt(n) * 0.9 - uTime * 1.1), 6.0);
+      float lit = 0.25 + 0.75 * wave + 0.9 * st * exp(-abs(sqrt(n) * cR - 0.06 - 0.25 * fract(uTime * 0.25)) * 30.0);
+      float sz = (0.0022 + 0.0016 * wave) * cR / 0.0118;
+      glow += (1.0 - smoothstep(sz * 0.5, sz, d)) * lit + exp(-d / (sz * 2.5)) * 0.07 * lit;
+    }
+    col += glow * uGeoS.w * mix(uGold, uBlue, smoothstep(0.15, 0.42, r)) * smoothstep(uGeoS.z + 0.06, uGeoS.z - 0.12, r);
   }
-  // малый тор внутри крутится навстречу
-  for (int i = 0; i < 16; i++) {
-    float a = -float(i) / 16.0 * TAU - aT() * 0.05;
-    vec2 c = 0.45 * R * vec2(cos(a), sin(a));
-    lines += (1.0 - smoothstep(LW * 0.5, LW * 0.5 + PX, abs(length(q - c) - 0.45 * R) * tilt)) * 0.35;
-  }
-  col += min(lines, 1.6) * mix(uGold, uBlue, 0.25) * (0.45 + 0.35 * uPad);
-  col += uGold * exp(-length(p) * 9.0) * (0.25 + 0.3 * uPad);
-  col += spores(p, uGold, 0.25);
+  col += uGold * exp(-length(p) * 9.0) * (0.25 + 0.3 * uPad) * uGeoX.y;
+  col += spores(p, uGold, 0.2);
   return col;
 }
 
 vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : id == 3 ? sceneField(p, sd)
-  : id == 4 ? sceneMyc(p, sd) : id == 5 ? sceneFlower(p, sd) : id == 6 ? sceneTopo(p, sd) : id == 7 ? sceneNebula(p, sd)
-  : id == 8 ? sceneLotus(p, sd) : id == 9 ? sceneMetatron(p, sd) : sceneTorus(p, sd); }
+  : id == 4 ? sceneMyc(p, sd) : id == 6 ? sceneTopo(p, sd) : id == 7 ? sceneNebula(p, sd) : sceneGeo(p, sd); }
 // мелкие детали поверх любой сцены: полоска-спектр, развёртка по такту, спутники, метки по углам
 vec3 details(vec3 c, vec2 p){
   vec3 lc = mix(vec3(0.9, 0.89, 0.85), vec3(0.08, 0.08, 0.07), uTone);
@@ -1409,6 +1435,10 @@ void main(){
       float sw = 1.6 * bump * exp(-2.5 * dot(p, p));
       pa = rot2(sw) * pa + fl * 0.12 * bump; pb = rot2(-sw * 0.6) * pb + fl * 0.12 * bump;
     }
+    if (uGeoBoth == 1) {
+      // метаморфоза геометрии в геометрию: одна фигура, окружности которой плавно перестраиваются (их ведёт JS)
+      c = sceneGeo(featWarp(p, uSceneB, M, sM, vec3(0.0)), uSeedB);
+    } else {
     vec3 ca = scene(uSceneA, pa, uSeedA), cb = scene(uSceneB, pb, uSeedB);
     // новая сцена проступает растеканием: по мягкому шуму, яркие элементы новой — раньше остальных
     float n = 0.75 * fbm(p * 2.2 + vec2(uTime * 0.12, -uTime * 0.07)) + 0.25 * vnoise(p * 9.0 - uTime * 0.3);
@@ -1419,6 +1449,7 @@ void main(){
     // по кромке растекания — тонкий светящийся край цвета схемы
     float edge = (1.0 - smoothstep(0.0, 0.022, abs(fr - n))) * bump;
     c = mix(c, mix(uBlue, vec3(1.0), 0.45), edge * 0.55);
+    }
   } else c = scene(uSceneA, pa, uSeedA);
   if (uTheme == 0) c = details(c, p);
   // дроп: из центра расходится тонкая ударная волна
@@ -1853,7 +1884,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -2091,7 +2122,7 @@ function visTime(m, p, ts) {
 }
 function frameState(t) {
   ensureMap();
-  const p = state.p, m = state.m;
+  const m = state.m, p = modParams(state.p, t + state.p.syncMs / 1000);   // значения с LFO в этот момент
   const ts = m ? visTime(m, p, t + p.syncMs / 1000) : t + p.syncMs / 1000;
   const U = { uMix: 0, uSceneA: 0, uSceneB: 0, uSeedA: [0.3, 0.5, 0.7, 1], uSeedB: [0.3, 0.5, 0.7, 1],
     uKick: 0, uSpring: 0, uHat: 0, uLow: 0, uMid: 0, uHigh: 0, uLowSlow: 0, uStab: 0, uTension: 0, uFlash: 0, uBeat: 0, uTime: ts % 1000,
@@ -2181,6 +2212,14 @@ function frameState(t) {
   U.uStab = Math.min(1.5, envSum(m.stabs, ts, 0.35, 2));
   recentEvents(m.kicks, ts, 2.5, 6).forEach((i, k) => { U.uKicks.set([ts - m.kicks.t[i], m.kicks.s[i], hash01(i, 5), 0], k * 4); U.uKickN = k + 1; });
   U.uPad = sample(m.pad, ts); U.uFlowT = (ts < 0 ? ts : sample(m.flowT, ts)) % 2000;
+  // священная геометрия: форма сцены A (и B); если обе — геометрия, рисуем одну фигуру-метаморфозу
+  U.uGeoBoth = 0;
+  if (GEO_IDS.has(U.uSceneA) || GEO_IDS.has(U.uSceneB)) {
+    const gctx = (sd) => ({ pad: U.uPad, lowSlow: sample(m.lowSlow, ts), flowA: U.uFlowT * p.flow, sd });
+    const gA = GEO_IDS.has(U.uSceneA) ? geoShape(U.uSceneA, ts, gctx(U.uSeedA)) : null, gB = GEO_IDS.has(U.uSceneB) ? geoShape(U.uSceneB, ts, gctx(U.uSeedB)) : null;
+    if (gA && gB && U.uMix > 0) { geoUniforms(U, geoMix(gA, gB, U.uMix)); U.uGeoBoth = 1; }
+    else geoUniforms(U, U.uMix > 0.5 && gB ? gB : gA || gB);
+  }
   U.uPads = new Float32Array(32); U.uPadN = 0;
   for (const i of recentEvents(m.stabs, ts, 16, 60)) { if (m.stabEcho[i] !== 0 || U.uPadN >= 8) continue; U.uPads.set([ts - m.stabs.t[i], m.stabs.s[i], hash01(i, 17), 0], U.uPadN * 4); U.uPadN++; }
   recentEvents(m.stabs, ts, 4.5, 12).forEach((i, k) => { U.uStabs.set([ts - m.stabs.t[i], m.stabs.s[i], m.stabEcho[i], hash01(m.stabChain[i], 9)], k * 4); U.uStabN = k + 1; });
@@ -2433,11 +2472,26 @@ function buildControls() {
         controls[it.key] = () => { inp.value = state.p[it.key]; };
       } else {
         el = document.createElement('div'); el.className = 'row';
-        el.innerHTML = `<label>${it.label}<i title="Вернуть по умолчанию">↺</i></label><input type="range" min="${it.min * k}" max="${it.max * k}" step="${it.step * k}"><input type="number" step="any">`;
+        const hasL = LFO_KEYS.has(it.key);
+        el.innerHTML = `<label>${it.label}<span>${hasL ? '<b class="lfo" title="LFO: медленное колебание силы вокруг значения ползунка">∿</b> ' : ''}<i title="Вернуть по умолчанию">↺</i></span></label><input type="range" min="${it.min * k}" max="${it.max * k}" step="${it.step * k}"><input type="number" step="any">`
+          + (hasL ? `<div class="lfoBox" hidden><label>глубина<input type="range" min="0" max="1" step="0.01" data-f="depth"></label><label>период, с<input type="range" min="1" max="120" step="1" data-f="period"></label><label>форма<select data-f="shape">${LFO_SHAPES.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></label><output></output></div>` : '');
         const [rg, nb] = el.querySelectorAll('input'), round = (v) => +(+v).toFixed(6);
         rg.oninput = () => set(it.key, round(rg.value / k)); nb.onchange = () => set(it.key, round(nb.value / k));
-        el.querySelector('i').onclick = () => set(it.key, themeDefaults(state.p.theme)[it.key]);
+        el.querySelector('label i').onclick = () => set(it.key, themeDefaults(state.p.theme)[it.key]);
         controls[it.key] = () => { const v = round(state.p[it.key] * k); rg.value = v; nb.value = v; };
+        if (hasL) {
+          const box = el.querySelector('.lfoBox'), btn = el.querySelector('.lfo'), out = box.querySelector('output');
+          const cur = () => ({ depth: 0, period: 20, shape: 'sine', ...(state.p.lfo || {})[it.key] });
+          btn.onclick = () => { box.hidden = !box.hidden; };
+          box.querySelectorAll('[data-f]').forEach(inp => inp.oninput = () => {
+            const l = cur(); l[inp.dataset.f] = inp.dataset.f === 'shape' ? inp.value : Number(inp.value);
+            set('lfo', { ...(state.p.lfo || {}), [it.key]: l });
+          });
+          const prev = controls[it.key];
+          controls[it.key] = () => { prev(); const l = cur(); btn.classList.toggle('on', l.depth > 0);
+            box.querySelectorAll('[data-f]').forEach(inp => { inp.value = l[inp.dataset.f]; });
+            out.textContent = l.depth > 0 ? `±${(l.depth * 50).toFixed(0)}% диапазона, раз в ${l.period} с` : 'выключено'; };
+        }
       }
       if (it.th) el.dataset.th = it.th;
       d.appendChild(el);
@@ -2629,6 +2683,11 @@ function initUI() {
   $('presetIn').onchange = (e) => { const f = e.target.files[0]; if (f) f.text().then(t => applyPreset(JSON.parse(t))).catch(err => alert('Не читается пресет: ' + err.message)); e.target.value = ''; };
   $('bReset').onclick = () => { if (confirm('Вернуть все параметры по умолчанию?')) applyPreset({ params: themeDefaults(state.p.theme) }); };
   document.querySelectorAll('#themeSw button').forEach(b => b.onclick = () => setTheme(b.dataset.t));
+  $('bLfoAll').onclick = () => {
+    const lfo = {}; for (const k of LFO_KEYS) lfo[k] = { depth: +(0.12 + Math.random() * 0.28).toFixed(2), period: Math.round(7 + Math.random() * 38), shape: LFO_SHAPES[Math.floor(Math.random() * 3)][0] };
+    set('lfo', lfo);
+  };
+  $('bLfoOff').onclick = () => set('lfo', {});
   drawTimelineBase(); setT(0);
   ready.then(() => redraw());
   detectStudio();
