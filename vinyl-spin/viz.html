@@ -143,7 +143,7 @@ const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
   scenes: 'auto', seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
-  blk: 13, grain: 0.05, ascii: 0.35, glitch: 1, ca: 1, morphBars: 4,
+  blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 1.2,
   kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1,
   syncMs: 0, bpmFix: 0, gridShiftMs: 0,
   logoMode: 'none', logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
@@ -156,7 +156,7 @@ const SCHEMA = [
     { key: 'fps', label: 'Кадров в секунду', type: 'select', num: true, options: [[24, '24'], [25, '25'], [30, '30'], [50, '50'], [60, '60']] },
   ]},
   { title: 'Тема: даб-техно', open: true, items: [
-    { key: 'scenes', label: 'Сцены', type: 'select', options: [['auto', 'по секциям: грув — тёмные, брейк — светлые'], ...SCENE_NAMES.map((n, i) => [String(i), 'только «' + n + '»'])] },
+    { key: 'scenes', label: 'Сцены', type: 'select', options: [['auto', 'все по очереди, в случайном порядке'], ...SCENE_NAMES.map((n, i) => [String(i), 'только «' + n + '»'])] },
     { key: 'seed', label: 'Вариант (seed)', min: 1, max: 999, step: 1 },
     { key: 'blue', label: 'Синий', type: 'color' },
     { key: 'red', label: 'Красный', type: 'color' },
@@ -166,7 +166,9 @@ const SCHEMA = [
     { key: 'ascii', label: 'ASCII: сколько кадра пересобирать символами', min: 0, max: 1, step: 0.01 },
     { key: 'glitch', label: 'Глитч: сдвиги строк и блоков', min: 0, max: 2, step: 0.01 },
     { key: 'ca', label: 'Хроматическая аберрация', min: 0, max: 3, step: 0.01 },
-    { key: 'morphBars', label: 'Перетекание стилей, тактов', min: 1, max: 16, step: 1 },
+    { key: 'styleMin', label: 'Смена стиля: не чаще, чем раз в, с', min: 1, max: 30, step: 0.5 },
+    { key: 'styleMax', label: 'Смена стиля: не реже, чем раз в, с', min: 1, max: 60, step: 0.5 },
+    { key: 'morphSec', label: 'Перетекание стилей, с', min: 0.1, max: 6, step: 0.1 },
   ]},
   { title: 'Реакция на трек', open: true, items: [
     { key: 'kickAmt', label: 'Кик: пятна, кольца, прогиб линий', min: 0, max: 2, step: 0.01 },
@@ -875,12 +877,6 @@ vec3 details(vec3 c, vec2 p){
   // развёртка: тонкая вертикаль проходит кадр за такт
   float sx = mix(-hw, hw, uBar);
   c = mix(c, lc, (1.0 - smoothstep(0.0, PX * 1.2, abs(p.x - sx))) * 0.12);
-  // спутники вокруг центра — оборот за такт
-  for (int i = 0; i < 3; i++) {
-    float a = uBar * TAU + float(i) * TAU / 3.0 + uTime * 0.05;
-    vec2 sp = vec2(cos(a), sin(a)) * vec2(0.36, 0.34);
-    c = mix(c, i == 0 ? uRed : lc, box(p, sp, vec2(0.0035)) * 0.85);
-  }
   // метки совмещения по углам
   for (int i = 0; i < 4; i++) {
     vec2 cp = vec2((i % 2 == 0 ? -1.0 : 1.0) * (hw - 0.05), (i < 2 ? 1.0 : -1.0) * 0.45);
@@ -918,13 +914,16 @@ void main(){
 }`;
 
 // проход 2: глитч (сдвиги строк и блоков), хроматическая аберрация, ASCII-полосы, развёртка, зерно, логотип
+// атлас ASCII: пробел, затем от лёгких символов к плотным
+const GLYPHS = ' .,:;-~=+*^<>/\\|()[]{}!?xo%#&$@0123456789';
 const FS_PRINT = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes; uniform sampler2D uScene, uGlyphs;
-uniform float uGrain, uTone, uMix, uAscii, uGlitch, uCA, uKick, uKickAmt, uTime; uniform vec3 uBgA, uBgB; uniform uint uFrame, uSeed, uGlitchSeed, uAsciiSeed;
+uniform float uGrain, uTone, uMix, uAscii, uGlitch, uCA, uKick, uKickAmt, uTime; uniform vec3 uBgA, uBgB, uBlue, uRed, uGold; uniform vec4 uAMode; uniform float uHigh; uniform uint uFrame, uSeed, uGlitchSeed, uAsciiSeed;
 uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
 out vec4 o;
-const float NG = 11.0;   // символов в атласе: от пустого к плотному
+const float NG = ${GLYPHS.length}.0;   // символов в атласе
+const float TAU = 6.2831853;
 uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; return v; }
 float h2(vec2 c, uint k){ return float(pcg3d(uvec3(uvec2(ivec2(floor(c)) + 32768), k)).x) * (1.0 / 4294967295.0); }
 float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
@@ -946,21 +945,40 @@ void main(){
   vec2 dir = (frag - 0.5 * uRes) / H;
   float ca = (uCA * (1.0 + 0.8 * min(uKick, 1.0) * uKickAmt) + 0.008 * g) * H;
   vec3 col = vec3(tap(sp + dir * ca).r, tap(sp).g, tap(sp - dir * ca).b);
-  // ASCII: полосы клеток пересобираются из символов по яркости
-  vec2 cs = vec2(9.0, 16.0) * u1, cell = floor(frag / cs);
-  float bandOn = step(h2(vec2(floor(cell.y / 4.0), 7.0), uAsciiSeed), uAscii);
+  // ASCII: части кадра пересобираются из символов. Какие клетки — зависит от режима стиля (uAMode):
+  // x — полосы по долям, y — бегущие волны, z — «дождь» столбцами, w — круги от центра
+  vec2 cs = vec2(9.0, 16.0) * u1, cell = floor(frag / cs), grid = floor(uRes / cs);
+  float t = uTime, thr = 1.0 - uAscii;
+  float fB = step(h2(vec2(floor(cell.y / 4.0), 7.0), uAsciiSeed), uAscii);
+  float wph = cell.x * 0.07 - t * 2.4 + 3.0 * sin(cell.y * 0.045 + t * 0.5);
+  float fW = step(thr, 0.5 + 0.5 * sin(wph) * cos(cell.y * 0.11 - t * 0.7));
+  float rsp = 0.35 + 0.9 * h2(vec2(cell.x, 3.0), uSeed), head = fract(t * rsp * 0.3 + h2(vec2(cell.x, 4.0), uSeed)) * grid.y * 1.4;
+  float d = (head - (grid.y - cell.y)) / (6.0 + 18.0 * uAscii);
+  float fR = step(0.0, d) * step(d, 1.0) * step(0.55 - 0.5 * uAscii, h2(vec2(cell.x, 5.0), uSeed + uAsciiSeed % 7u));
+  vec2 cn = (cell + 0.5 - 0.5 * grid) * cs / H;
+  float rr = length(cn), rph = rr * 22.0 - t * 4.0 - 3.0 * min(uKick, 1.0);
+  float fC = step(thr * 0.9 + 0.1, 0.5 + 0.5 * cos(rph)) * step(rr, 0.75);
   float trans = 4.0 * uMix * (1.0 - uMix);
-  float cellOn = max(bandOn, step(h2(cell, uAsciiSeed + 11u), trans * 0.55));
+  float cellOn = max(max(fB * uAMode.x, fW * uAMode.y), max(fR * uAMode.z, fC * uAMode.w));
+  cellOn = max(step(0.5, cellOn), step(h2(cell, uAsciiSeed + 11u), trans * 0.55));
   if (cellOn > 0.5) {
     vec2 cc = (cell + 0.5) * cs, inC = (frag - cell * cs) / cs;
     vec3 cc3 = tap(cc);
-    // плотность символа — насколько клетка отличается от фона сцены (обеих сцен при перетекании): пустой фон остаётся фоном
+    // клетка с фоном сцены (обеих сцен при перетекании) остаётся фоном, остальное — символы
     float v = min(length(cc3 - uBgA), length(cc3 - uBgB)) * 1.5;
     vec3 bgc = length(cc3 - uBgA) < length(cc3 - uBgB) ? uBgA : uBgB;
-    float gi = floor(clamp(v, 0.0, 0.999) * NG);
+    // символ всё время перебирается: у каждой клетки свой темп, на верхах быстрее; плотнее там, где ярче
+    float tick = floor(t * (5.0 + 14.0 * uHigh) + h2(cell, 21u) * 9.0);
+    float r = h2(cell + vec2(tick * 17.0, 0.0), uSeed + 23u);
+    float gi = v < 0.12 ? 0.0 : 1.0 + floor(clamp(0.55 * v + 0.55 * r - 0.1, 0.0, 0.999) * (NG - 1.0));
     float glyph = texture(uGlyphs, vec2((gi + clamp(inC.x, 0.05, 0.95)) / NG, 1.0 - inC.y)).r;
     float lt = step(0.5, dot(bgc, vec3(0.333)));
     vec3 fg = mix(max(cc3 * 1.2, vec3(0.25)), cc3 * 0.7, lt);
+    // перелив: по символам бежит градиент синий → красный → золотой, яркость пульсирует волной
+    float hp = fract(cell.x * 0.012 - cell.y * 0.02 - t * 0.25 + 0.15 * sin(wph));
+    vec3 pal = hp < 0.33 ? mix(uBlue, uRed, hp * 3.0) : hp < 0.66 ? mix(uRed, uGold, hp * 3.0 - 1.0) : mix(uGold, uBlue, hp * 3.0 - 2.0);
+    fg = mix(fg, mix(pal * 1.15, pal * 0.8, lt), 0.25 + 0.4 * max(uAMode.y, uAMode.w));
+    fg *= 0.8 + 0.3 * sin(wph * 0.7 + rph * 0.3);
     col = mix(bgc, fg, glyph);
   }
   // развёртка и лёгкая виньетка
@@ -1001,7 +1019,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1016,7 +1034,7 @@ class Renderer {
     this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
     this.logoTex = this.makeTex(); this.waveTex = this.makeTex(); this.glyphTex = this.makeTex();
     // атлас ASCII: символы от пустого к плотному, белым по чёрному
-    const GL = ' .,:-=+*%#@', gw = 32, gh = 56, gc = document.createElement('canvas'); gc.width = gw * GL.length; gc.height = gh;
+    const GL = GLYPHS, gw = 32, gh = 56, gc = document.createElement('canvas'); gc.width = gw * GL.length; gc.height = gh;
     const gx = gc.getContext('2d'); gx.fillStyle = '#000'; gx.fillRect(0, 0, gc.width, gh);
     gx.fillStyle = '#fff'; gx.font = 'bold 46px Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace'; gx.textAlign = 'center'; gx.textBaseline = 'middle';
     [...GL].forEach((ch, i) => gx.fillText(ch, i * gw + gw / 2, gh / 2 + 2));
@@ -1136,23 +1154,27 @@ function ensureMap() { if (state.raw && (dirtyMap || !state.m)) { state.m = prep
 /* ==========================================================================
    Кадр как функция времени
    ========================================================================== */
-// грув — тёмные сцены (0, 2 по очереди), интро/брейк/аутро — светлые (1, 3)
-function sceneOfSection(s) {
-  const p = state.p; if (p.scenes !== 'auto') return +p.scenes;
-  const n = (s.n || 1) - 1;
-  if (s.kick) return n % 2 ? 2 : 0;
-  return s.type === 'intro' ? 1 : s.type === 'outro' ? 3 : (n % 2 ? 1 : 3);
-}
-// отрезки стиля: секция делится на куски по 16 тактов, соседние куски — разные сцены одного тона
+// отрезки стиля: случайная длина от styleMin до styleMax секунд, граница — на ближайшей доле;
+// на дропе стиль меняется обязательно. Каждый отрезок — своя сцена, свой вариант и свой режим ASCII.
+const ASCII_MODES = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [1, 1, 0, 0], [0, 1, 0, 1], [0, 0, 1, 1]];
 function styleSegments(m) {
-  const key = state.p.scenes + '|' + state.p.seed;
+  const p = state.p, key = [p.scenes, p.seed, p.styleMin, p.styleMax, p.bpmFix, p.gridShiftMs].join('|');
   if (m.segCache && m.segCache.key === key) return m.segCache;
-  const bar = 4 * m.beatLen, t = [], s = [];
-  m.sections.forEach((sec, i) => {
-    const base = sceneOfSection(sec), alt = state.p.scenes === 'auto' ? (base + 2) % 4 : base;
-    const end = i + 1 < m.sections.length ? m.sections[i + 1].t : m.duration;
-    for (let k = 0, tt = sec.t; tt < end - 4 * bar || k === 0; k++, tt += 16 * bar) { t.push(tt); s.push({ scene: k % 2 ? alt : base, seed: seedOfSection(i * 31 + k), trans: k === 0 ? sec.trans : 'shift' }); }
-  });
+  const lo = Math.max(0.5, Math.min(p.styleMin, p.styleMax)), hi = Math.max(lo, p.styleMin, p.styleMax);
+  const snap = (x) => m.grid ? m.beat0 + Math.round((x - m.beat0) / m.beatLen) * m.beatLen : x;
+  const drops = m.sections.filter(s => s.trans === 'drop').map(s => s.t);
+  const t = [], s = [];
+  let tt = 0, scene = p.scenes === 'auto' ? Math.floor(hash01(p.seed, 41) * 4) : +p.scenes, mode = -1;
+  for (let k = 0; tt < m.duration && k < 100000; k++) {
+    const r = (q) => hash01(p.seed * 7919 + k, q);
+    if (k > 0 && p.scenes === 'auto') scene = (scene + 1 + Math.floor(r(5) * 3)) % 4;   // любая другая из трёх
+    let nm = Math.floor(r(6) * ASCII_MODES.length); if (nm === mode) nm = (nm + 1) % ASCII_MODES.length; mode = nm;
+    const isDrop = drops.some(d => Math.abs(d - tt) < 1e-6);
+    t.push(tt); s.push({ scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], trans: isDrop ? 'drop' : 'shift' });
+    let next = Math.max(snap(tt + lo + r(7) * (hi - lo)), tt + 0.5 * lo);
+    const d = drops.find(d => d > tt + 0.25 && d < next + 0.25 * lo);   // дроп рядом — меняемся ровно на нём
+    tt = d ?? next;
+  }
   m.segCache = { key, t: Float64Array.from(t), s };
   return m.segCache;
 }
@@ -1168,20 +1190,21 @@ function frameState(t) {
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
     uKicks: new Float32Array(24), uStabs: new Float32Array(48), uHats: new Float32Array(16), uKickN: 0, uStabN: 0, uHatN: 0,
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
-    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
+    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
   if (!m) return st;
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
-  // стили перетекают: на границах секций и каждые 16 тактов внутри секции — к соседней сцене того же тона
-  const segs = styleSegments(m), bar = 4 * m.beatLen;
+  // стили перетекают: на границе отрезка (каждые styleMin–styleMax с) — к случайной другой сцене
+  const segs = styleSegments(m);
   let j = Math.max(0, upper(segs.t, ts) - 1);
-  const D = (k) => Math.min((segs.s[k].trans === 'drop' ? 1 : p.morphBars) * bar, (segs.t[k] - (segs.t[k - 1] ?? -1e9)) / 2, ((segs.t[k + 1] ?? 1e9) - segs.t[k]) / 2);
+  const D = (k) => Math.min(segs.s[k].trans === 'drop' ? Math.min(p.morphSec, 0.5) : p.morphSec, (segs.t[k] - (segs.t[k - 1] ?? -1e9)) / 2, ((segs.t[k + 1] ?? 1e9) - segs.t[k]) / 2);
   let from = j, to = j, u = 0;
   if (j > 0 && ts < segs.t[j] + D(j) / 2) { from = j - 1; to = j; u = (ts - (segs.t[j] - D(j) / 2)) / D(j); }
   else if (j + 1 < segs.t.length && ts > segs.t[j + 1] - D(j + 1) / 2) { from = j; to = j + 1; u = (ts - (segs.t[j + 1] - D(j + 1) / 2)) / D(j + 1); }
   u = Math.min(1, Math.max(0, u)); u = u * u * (3 - 2 * u);
   U.uSceneA = segs.s[from].scene; U.uSeedA = segs.s[from].seed; U.uSceneB = segs.s[to].scene; U.uSeedB = segs.s[to].seed;
   U.uMix = from === to ? 0 : u;
+  U.uAMode = segs.s[from].mode.map((a, i) => a * (1 - U.uMix) + segs.s[to].mode[i] * U.uMix);
   const tone = (k) => k % 2 === 1 ? 1 : 0;
   U.uTone = tone(U.uSceneA) * (1 - U.uMix) + tone(U.uSceneB) * U.uMix;
   const BG = [[0.065, 0.066, 0.054], [0.885, 0.876, 0.862], [0.07, 0.064, 0.036], [0.925, 0.925, 0.918]];
