@@ -145,6 +145,7 @@ const VDEF = Object.freeze({
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
+  looks: 'auto', vhs: 0.7, riso: 1, xerox: 1, brutal: 0.8, misreg: 1, risoInks: 'fluo', risoScreen: 'grain',
   kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1,
   syncMs: 0, bpmFix: 0, gridShiftMs: 0,
   logoMode: 'none', logoSize: 0.131, logoRight: 0.042, logoBottom: 0.040, logoOpacity: 1,
@@ -173,6 +174,16 @@ const SCHEMA = [
     { key: 'styleMin', label: 'Смена стиля: не чаще, чем раз в, с', min: 1, max: 30, step: 0.5 },
     { key: 'styleMax', label: 'Смена стиля: не реже, чем раз в, с', min: 1, max: 60, step: 0.5 },
     { key: 'morphSec', label: 'Перетекание стилей, с', min: 0.1, max: 6, step: 0.1 },
+  ]},
+  { title: 'Аналог: VHS, ризограф, ксерокс, брутализм', open: true, items: [
+    { key: 'looks', label: 'Как включаются', type: 'select', options: [['auto', 'свой «аналог» у каждого отрезка стиля (сила — ползунки ниже)'], ['manual', 'всё время вместе, сила — ползунки ниже'], ['off', 'выключить']] },
+    { key: 'vhs', label: 'VHS: трекинг, растёкшийся цвет, дрожание строк, снег', min: 0, max: 1, step: 0.01 },
+    { key: 'riso', label: 'Ризограф: краски по бумаге', min: 0, max: 1, step: 0.01 },
+    { key: 'risoInks', label: 'Краски ризографа', type: 'select', options: [['fluo', 'флуо-розовый, синий, жёлтый'], ['redteal', 'ярко-красный, бирюзовый, чёрный'], ['federal', 'федеральный синий, оранжевый, подсолнух'], ['palette', 'из цветовой схемы + чёрный'], ['mono', 'чёрный и красный']] },
+    { key: 'risoScreen', label: 'Растр ризографа', type: 'select', options: [['grain', 'зерно (как у ризографа)'], ['dots', 'точки под разными углами']] },
+    { key: 'misreg', label: 'Несовмещение красок', min: 0, max: 4, step: 0.01 },
+    { key: 'xerox', label: 'Ксерокс: тонер, полосы барабана, пыль', min: 0, max: 1, step: 0.01 },
+    { key: 'brutal', label: 'Брутализм: сетка, плашки, блоки, метки приводки', min: 0, max: 1, step: 0.01 },
   ]},
   { title: 'Реакция на трек', open: true, items: [
     { key: 'kickAmt', label: 'Кик: пятна, кольца, прогиб линий', min: 0, max: 2, step: 0.01 },
@@ -974,7 +985,7 @@ void main(){
   o = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
-// проход 2: глитч (сдвиги строк и блоков), хроматическая аберрация, ASCII-полосы, развёртка, зерно, логотип
+// проход 2: глитч (сдвиги строк и блоков), хроматическая аберрация, ASCII, эффекты стиля
 // атлас ASCII: пробел, затем от лёгких символов к плотным
 const GLYPHS = ' .,:;-~=+*^<>/\\|()[]{}!?xo%#&$@0123456789';
 const FS_PRINT = `#version 300 es
@@ -1086,15 +1097,203 @@ void main(){
     vec2 ib = floor(frag / (vec2(96.0, 54.0) * u1));
     if (h2(ib, uGlitchSeed + 71u) < 0.18 * uInvert) col = 1.0 - col;
   }
+  o = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+// общие функции для аналоговых проходов
+const GLSL_COMMON = `
+uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; v ^= v >> 16u; v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y; return v; }
+float h2(vec2 c, uint k){ return float(pcg3d(uvec3(uvec2(ivec2(floor(c)) + 32768), k)).x) * (1.0 / 4294967295.0); }
+float vnoise(vec2 x, uint k){ vec2 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h2(i, k), h2(i + vec2(1.0, 0.0), k), f.x), mix(h2(i + vec2(0.0, 1.0), k), h2(i + 1.0, k), f.x), f.y); }
+float fbm(vec2 x, uint k){ return 0.55 * vnoise(x, k) + 0.3 * vnoise(x * 2.03 + 17.0, k + 1u) + 0.15 * vnoise(x * 4.1 + 5.0, k + 2u); }
+float lum(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+mat2 rot2(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+vec3 tap(vec2 f){ return texture(uSrc, f / uRes).rgb; }
+`;
+
+// проход 3: «печать» — ризограф (2–3 краски, несовмещение, зерно или растр, бумага), ксерокс, брутализм
+const FS_MEDIA = `#version 300 es
+precision highp float; precision highp int;
+uniform vec2 uRes; uniform sampler2D uSrc;
+uniform vec4 uLook;                  // x — VHS (здесь не нужен), y — ризограф, z — ксерокс, w — брутализм
+uniform vec3 uInk1, uInk2, uInk3, uRed;
+uniform float uTone, uTime, uKick, uKickAmt, uLow, uHigh, uHat, uMisreg, uPaper, uBeatIdx, uBarIdx;
+uniform int uRisoScreen; uniform uint uFrame, uSeed, uLayoutSeed;
+out vec4 o;
+${GLSL_COMMON}
+const vec3 PAPER = vec3(0.955, 0.937, 0.894), TONER = vec3(0.075, 0.07, 0.068);
+// тёмные сцены печатаются негативом (яркие элементы — краской по бумаге), оттенок сохраняется
+vec3 printable(vec3 c){ float l = lum(c); return mix(clamp(c + (1.0 - 2.0 * l), 0.0, 1.0), c, uTone); }
+// плотности трёх красок: наименьшие квадраты по поглощению (1 − цвет краски), с регуляризацией
+vec3 inkDensity(vec3 c){
+  vec3 t = clamp(1.0 - c / PAPER, 0.0, 1.0);
+  vec3 A1 = 1.0 - uInk1, A2 = 1.0 - uInk2, A3 = 1.0 - uInk3;
+  mat3 G = mat3(dot(A1, A1), dot(A1, A2), dot(A1, A3), dot(A2, A1), dot(A2, A2), dot(A2, A3), dot(A3, A1), dot(A3, A2), dot(A3, A3)) + mat3(0.03);
+  return clamp(inverse(G) * vec3(dot(A1, t), dot(A2, t), dot(A3, t)), 0.0, 1.0);
+}
+float risoCover(float d, vec2 f, int k, float u1){
+  uint kk = uint(k) * 31u + uLayoutSeed;
+  // неровный прокат: крупные пятна и полосы от барабана
+  d *= 0.8 + 0.32 * fbm(f / (260.0 * u1) + float(k) * 7.0, kk + 5u);
+  d *= 0.94 + 0.06 * sin(f.y / (uRes.y * 0.11) + float(k) * 2.0);
+  if (uRisoScreen == 1) {
+    float ang = float[3](0.26, 1.31, 0.79)[k], cs = 7.5 * u1;
+    vec2 q = rot2(ang) * f / cs, qc = fract(q) - 0.5;
+    float r = 0.72 * sqrt(d);
+    return 1.0 - smoothstep(r - 0.09, r + 0.09, length(qc));
+  }
+  // зерно ризографа: мелкий шум со сгустками
+  float n = 0.62 * h2(f / (1.4 * u1), kk) + 0.38 * vnoise(f / (3.2 * u1), kk + 9u);
+  return smoothstep(n - 0.06, n + 0.06, d * 1.08);
+}
+vec3 riso(vec2 f, float u1){
+  vec3 out3 = PAPER;
+  for (int k = 0; k < 3; k++) {
+    // несовмещение: у каждой краски свой сдвиг на отрезок, медленный дрейф и толчок на кик
+    vec2 dir = vec2(h2(vec2(float(k), 1.0), uLayoutSeed), h2(vec2(float(k), 2.0), uLayoutSeed)) - 0.5;
+    vec2 off = uMisreg * u1 * (dir * 14.0 + 3.0 * vec2(sin(uTime * 0.7 + float(k) * 2.0), cos(uTime * 0.5 + float(k))) + dir * 10.0 * min(uKick, 1.0) * uKickAmt);
+    if (k == 0) off *= 0.3;
+    float d = min(1.0, inkDensity(printable(tap(f + off)))[k] * 1.2);
+    vec3 ink = k == 0 ? uInk1 : k == 1 ? uInk2 : uInk3;
+    out3 *= 1.0 - risoCover(d, f, k, u1) * (1.0 - ink);          // краски перемножаются, как на бумаге
+  }
+  // случайные крапинки краски по бумаге
+  if (h2(f / (2.0 * u1), uLayoutSeed + 77u) < 0.0007) out3 *= uInk2 * 0.9 + 0.1;
+  return out3;
+}
+vec3 xerox(vec2 f, float u1){
+  // ксерокс: размытая копия, жёсткий порог с шумом тонера, полосы барабана, пыль; шум тонера «кипит» 12,5 раз в секунду
+  uint fr = uFrame / 2u;
+  vec3 c = vec3(0.0);
+  for (int i = 0; i < 5; i++) c += tap(f + vec2(float[5](0.0, 1.5, -1.5, 0.0, 0.0)[i], float[5](0.0, 0.0, 0.0, 1.5, -1.5)[i]) * u1);
+  float l = lum(printable(c / 5.0));
+  float n = vnoise(f / (2.2 * u1), fr * 3u + 1u) - 0.5;
+  float th = 0.55 + 0.06 * min(uHat, 1.0) + 0.1 * (fbm(f / (300.0 * u1), uLayoutSeed) - 0.5);
+  float toner = smoothstep(th - 0.05, th + 0.05, 1.0 - l + 0.35 * n);
+  // полосы барабана: тонкие вертикали, прерывистые
+  float col = floor(f.x / (2.0 * u1));
+  if (h2(vec2(col, 3.0), uLayoutSeed) < 0.012) toner = max(toner, 0.7 * step(0.45, vnoise(vec2(col, f.y / (90.0 * u1)), uLayoutSeed + 3u)));
+  // пыль и точки тонера
+  if (h2(f / (2.0 * u1), fr + 41u) < 0.0012) toner = 1.0;
+  if (h2(f / (1.0 * u1), fr + 43u) < 0.02 * toner) toner = 0.0;
+  // тень от крышки по краям листа
+  vec2 uv = f / uRes;
+  float edge = max(smoothstep(0.035, 0.0, uv.x), smoothstep(0.965, 1.0, uv.x)) * (0.6 + 0.4 * vnoise(vec2(f.y / (40.0 * u1), 1.0), uLayoutSeed));
+  toner = max(toner, edge);
+  return mix(PAPER, TONER, toner);
+}
+float rectF(vec2 f, vec4 r){ return step(r.x, f.x) * step(f.x, r.z) * step(r.y, f.y) * step(f.y, r.w); }
+vec3 brutal(vec3 col, vec2 f, float u1, float a){
+  // брутализм: жёсткая сетка 12×6, рамка, толстые плашки, блоки (врезаются по долям), метки приводки
+  vec2 cell = uRes / vec2(12.0, 6.0);
+  uint L = uLayoutSeed;
+  vec3 K = vec3(0.04), R = uRed;
+  // контент грубее: меньше полутонов
+  col = mix(col, floor(col * 3.0 + 0.5) / 3.0, 0.35 * a);
+  // тонкая сетка
+  vec2 gm = abs(fract(f / cell + 0.5) - 0.5) * cell;
+  float hair = (1.0 - step(0.75 * u1, min(gm.x, gm.y))) * 0.35;
+  col = mix(col, mix(vec3(0.7), K, step(0.5, uTone)), hair * a);
+  // блоки: три прямоугольника по сетке; каждый появляется на своих долях
+  for (int i = 0; i < 4; i++) {
+    float fi = float(i);
+    vec2 c0 = floor(vec2(h2(vec2(fi, 1.0), L) * 11.0, h2(vec2(fi, 2.0), L) * 5.0));
+    vec2 sz = 1.0 + floor(vec2(h2(vec2(fi, 3.0), L) * 4.0, h2(vec2(fi, 4.0), L) * 2.0));
+    vec4 r = vec4(c0 * cell, min((c0 + sz) * cell, uRes));
+    float on = step(h2(vec2(fi, uBeatIdx), L + 5u), 0.55) * rectF(f, r);
+    float kind = h2(vec2(fi, 6.0), L);
+    vec3 fill = kind < 0.35 ? K : kind < 0.6 ? R : kind < 0.8 ? 1.0 - col : PAPER * 0.97;
+    col = mix(col, fill, on * a);
+  }
+  // толстые плашки: горизонтальная и вертикальная, ширина и место — на такт
+  float hb = floor(h2(vec2(uBarIdx, 7.0), L) * 6.0) * cell.y + cell.y * 0.5, hw = (6.0 + 30.0 * h2(vec2(uBarIdx, 8.0), L)) * u1;
+  float vb = floor(h2(vec2(uBarIdx, 9.0), L) * 12.0) * cell.x, vw = (6.0 + 22.0 * h2(vec2(uBarIdx, 10.0), L)) * u1;
+  float slam = 1.0 + 0.6 * min(uKick, 1.0) * uKickAmt;
+  col = mix(col, K, step(abs(f.y - hb), hw * slam) * step(0.3, h2(vec2(uBarIdx, 11.0), L)) * a);
+  col = mix(col, R, step(abs(f.x - vb), vw * 0.5) * step(0.5, h2(vec2(uBarIdx, 12.0), L)) * a);
+  // рамка листа
+  float bw = (10.0 + 26.0 * h2(vec2(3.0), L)) * u1;
+  float fr = 1.0 - step(bw, min(min(f.x, uRes.x - f.x), min(f.y, uRes.y - f.y)));
+  col = mix(col, K, fr * a);
+  // метки приводки: крестик в круге по углам внутреннего поля
+  for (int i = 0; i < 4; i++) {
+    vec2 cp = vec2(i % 2 == 0 ? bw + 46.0 * u1 : uRes.x - bw - 46.0 * u1, i < 2 ? bw + 46.0 * u1 : uRes.y - bw - 46.0 * u1);
+    vec2 d = f - cp; float rr = length(d);
+    float m = max(1.0 - step(1.2 * u1, abs(rr - 14.0 * u1)), max(step(abs(d.x), 0.9 * u1), step(abs(d.y), 0.9 * u1)) * step(rr, 22.0 * u1));
+    col = mix(col, K, m * a);
+  }
+  return col;
+}
+void main(){
+  vec2 f = gl_FragCoord.xy; float u1 = uRes.y / 1080.0;
+  vec3 col = tap(f);
+  if (uLook.y > 0.01) col = mix(col, riso(f, u1), uLook.y);
+  if (uLook.z > 0.01) col = mix(col, xerox(f, u1), uLook.z);
+  if (uLook.w > 0.01) col = brutal(col, f, u1, uLook.w);
+  o = vec4(col, 1.0);
+}`;
+
+// проход 4: «плёнка» — VHS (дрожание строк, трекинг, срыв головки, растёкшийся цвет, звон по краям, снег, выпадения),
+// затем развёртка, виньетка, логотип и зерно
+const FS_FINAL = `#version 300 es
+precision highp float; precision highp int;
+uniform vec2 uRes; uniform sampler2D uSrc;
+uniform vec4 uLook;
+uniform float uTime, uHigh, uLow, uTrack, uRoll, uGrain;
+uniform uint uFrame, uSeed, uLayoutSeed;
+uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
+out vec4 o;
+${GLSL_COMMON}
+float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
+vec3 rgb2yiq(vec3 c){ return vec3(dot(c, vec3(0.299, 0.587, 0.114)), dot(c, vec3(0.596, -0.274, -0.322)), dot(c, vec3(0.211, -0.523, 0.312))); }
+vec3 yiq2rgb(vec3 y){ return vec3(y.x + 0.956 * y.y + 0.621 * y.z, y.x - 0.272 * y.y - 0.647 * y.z, y.x - 1.106 * y.y + 1.703 * y.z); }
+void main(){
+  vec2 frag = gl_FragCoord.xy; float H = uRes.y, u1 = H / 1080.0;
+  float v = uLook.x;
+  vec3 col;
+  if (v > 0.01) {
+    vec2 f = frag;
+    // кадр срывается вверх на дропе: прокрутка с чёрной полосой между кадрами
+    float rollBar = 0.0;
+    if (uRoll > 0.0) { float y = f.y / H + uRoll; rollBar = step(fract(y), 0.03); f.y = fract(y) * H; }
+    float line = floor(f.y / (2.0 * u1));
+    // дрожание строк, сильнее на верхах
+    f.x += (h2(vec2(line, float(uFrame)), 3u) - 0.5) * 2.5 * u1 * v * (0.6 + uHigh);
+    // полоса трекинга ползёт снизу вверх; на событиях — шире и злее
+    float ty = fract(uTime * 0.043 + h2(vec2(1.0), uSeed)) * 1.3 - 0.15, bh = 0.03 + 0.06 * uTrack;
+    float bd = (f.y / H - ty) / bh, inB = exp(-bd * bd * 2.0) * (0.3 * v + 1.2 * uTrack);
+    f.x += inB * (sin(f.y / (3.0 * u1) + uTime * 37.0) * 7.0 + (h2(vec2(line, float(uFrame)), 7u) - 0.5) * 50.0) * u1;
+    // срыв головки внизу кадра
+    float hs = smoothstep(0.022, 0.0, f.y / H);
+    f.x += hs * v * (34.0 + 20.0 * h2(vec2(line, float(uFrame)), 8u)) * u1;
+    // яркость резкая со звоном по краям, цвет — узкой полосы и съезжает вправо
+    float Y = rgb2yiq(tap(f)).x, Yb = 0.25 * (rgb2yiq(tap(f - vec2(2.5 * u1, 0.0))).x + rgb2yiq(tap(f + vec2(2.5 * u1, 0.0))).x) + 0.5 * Y;
+    Y += (Y - Yb) * 1.4 * v;
+    vec2 iq = vec2(0.0);
+    for (int i = 0; i < 9; i++) iq += rgb2yiq(tap(f + vec2((9.0 * v + (float(i) - 4.0) * 4.0 * v) * u1, 0.0))).yz;
+    iq = mix(rgb2yiq(tap(f)).yz, iq / 9.0, v) * (1.0 - 0.18 * v);
+    // снег, выпадения ленты, полоса трекинга шумит
+    Y += (h2(frag / u1, uFrame + 101u) - 0.5) * (0.07 * v + 0.6 * inB);
+    if (h2(vec2(line, float(uFrame / 2u)), 11u) < 0.004 * v + 0.03 * inB) {
+      float x0 = h2(vec2(line, float(uFrame)), 12u) * uRes.x, len = (20.0 + 260.0 * h2(vec2(line, float(uFrame)), 13u)) * u1;
+      Y = mix(Y, 1.0, step(x0, f.x) * step(f.x, x0 + len) * 0.85);
+    }
+    Y += 0.05 * v * (1.0 - Y);                                        // приподнятый чёрный
+    col = mix(tap(frag), clamp(yiq2rgb(vec3(Y, iq)), 0.0, 1.0), min(1.0, v * 1.5));
+    col *= 1.0 - rollBar;
+    col *= 1.0 - 0.1 * v * step(0.5, fract(frag.y / (2.0 * u1)));     // чересстрочная развёртка
+  } else col = tap(frag);
   // развёртка и лёгкая виньетка
+  vec2 dir = (frag - 0.5 * uRes) / H;
   col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1)));
-  col *= 1.0 - 0.18 * smoothstep(0.55, 1.1, length(dir * vec2(0.85, 1.0)));
+  col *= 1.0 - (0.18 + 0.2 * v) * smoothstep(0.55, 1.1, length(dir * vec2(0.85, 1.0)));
   vec2 pix = vec2(frag.x, uRes.y - frag.y);
   if (uHasLogo == 1) {
     vec2 lu = (pix - uLogoRect.xy) / uLogoRect.zw;
     if (all(greaterThanEqual(lu, vec2(0.0))) && all(lessThan(lu, vec2(1.0)))) { vec4 lg = texture(uLogo, lu) * uLogoOpacity; col = col * (1.0 - lg.a) + lg.rgb; }
   }
-  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  float l = lum(col);
   if (uGrain > 0.0) col += uGrain * (0.55 + 0.9 * l * (1.0 - l)) * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.4))), uFrame);
   o = vec4(clamp(col, 0.0, 1.0), 1.0);
 }`;
@@ -1124,7 +1323,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1133,6 +1332,8 @@ class Renderer {
     this.gl = gl;
     this.main = this.program(FS_MAIN);
     this.print = this.program(FS_PRINT);
+    this.media = this.program(FS_MEDIA);
+    this.final = this.program(FS_FINAL);
     this.pack = this.program(FS_PACK);
     this.vao = gl.createVertexArray();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
@@ -1170,8 +1371,8 @@ class Renderer {
     const gl = this.gl;
     if (this.W === W && this.H === H) return;
     this.W = W; this.H = H; this.canvas.width = W; this.canvas.height = H;
-    for (const k of ['fbTex', 'packTex', 'sceneTex']) if (this[k]) gl.deleteTexture(this[k]);
-    for (const k of ['fb', 'packFb', 'sceneFb']) if (this[k]) gl.deleteFramebuffer(this[k]);
+    for (const k of ['fbTex', 'packTex', 'sceneTex', 'printTex', 'mediaTex']) if (this[k]) gl.deleteTexture(this[k]);
+    for (const k of ['fb', 'packFb', 'sceneFb', 'printFb', 'mediaFb']) if (this[k]) gl.deleteFramebuffer(this[k]);
     const mkTarget = (w, h, filter = gl.NEAREST) => {
       const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
       gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
@@ -1183,13 +1384,17 @@ class Renderer {
     };
     [this.fbTex, this.fb] = mkTarget(W, H);
     [this.sceneTex, this.sceneFb] = mkTarget(W, H, gl.LINEAR);
+    [this.printTex, this.printFb] = mkTarget(W, H, gl.LINEAR);
+    [this.mediaTex, this.mediaFb] = mkTarget(W, H, gl.LINEAR);
     [this.packTex, this.packFb] = mkTarget(W / 4, H * 3 / 2);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   draw(s) {
     const gl = this.gl;
     this.pass(this.main, this.sceneFb, s);   // 1) сцена
-    this.pass(this.print, this.fb, s);       // 2) печать
+    this.pass(this.print, this.printFb, s);  // 2) глитч, ASCII, эффекты стиля
+    this.pass(this.media, this.mediaFb, s, this.printTex);   // 3) ризограф, ксерокс, брутализм
+    this.pass(this.final, this.fb, s, this.mediaTex);         // 4) VHS, развёртка, логотип, зерно
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1200,7 +1405,7 @@ class Renderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, data.length / 4, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
   }
   // униформы ставим все, какие есть в программе (отсутствующие — без ошибок); тип — по таблице UT
-  pass(prog, target, s) {
+  pass(prog, target, s, src) {
     const gl = this.gl, { p, u } = prog;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target); gl.viewport(0, 0, this.W, this.H);
     gl.useProgram(p); gl.bindVertexArray(this.vao);
@@ -1208,6 +1413,7 @@ class Renderer {
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.sceneTex); gl.uniform1i(u.uScene, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.waveTex); gl.uniform1i(u.uWave, 3);
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.glyphTex); gl.uniform1i(u.uGlyphs, 4);
+    if (src) { gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, src); gl.uniform1i(u.uSrc, 5); }
     gl.uniform2f(u.uRes, this.W, this.H);
     for (const [name, v] of Object.entries(s.U)) {
       const loc = u[name]; if (!loc) continue;
@@ -1277,6 +1483,9 @@ function paletteAt(ts) {
   const a = pal(k), b = pal(k + 1);
   return a.map((c, i) => c.map((v, j) => v * (1 - w) + b[i][j] * w));
 }
+// «аналог» отрезка: [VHS, ризограф, ксерокс, брутализм]; часть отрезков идёт чистыми
+const LOOKS = [[0, 0, 0, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [0, 1, 0, 1], [1, 0, 0, 1], [0, 0, 1, 1], [1, 1, 0, 0], [0, 1, 0, 0], [1, 0, 0, 0]];
+const RISO_INKS = { fluo: ['#ff48b0', '#0078bf', '#ffe800'], redteal: ['#f15060', '#00838a', '#1a1a1a'], federal: ['#ff6c2f', '#3d5588', '#ffb511'], mono: ['#e8382a', '#1a1a1a', '#f4f0e6'] };
 const ASCII_MODES = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [1, 1, 0, 0], [0, 1, 0, 1], [0, 0, 1, 1]];
 function styleSegments(m) {
   const p = state.p, key = [p.scenes, p.seed, p.styleMin, p.styleMax, p.bpmFix, p.gridShiftMs].join('|');
@@ -1293,6 +1502,7 @@ function styleSegments(m) {
     const isDrop = drops.some(d => Math.abs(d - tt) < 1e-6);
     t.push(tt); s.push({ scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], fx: FX_MODES[Math.floor(r(8) * FX_MODES.length)], trans: isDrop ? 'drop' : 'shift',
       // тип перехода в этот отрезок: 0 — морфинг элементов, 1 — пролёт сквозь центр (и всегда на дропе), 2 — жидкость
+      look: LOOKS[Math.floor(r(13) * LOOKS.length)], layout: Math.floor(r(14) * 1e6),
       kind: isDrop ? 1 : [0, 0, 0, 1, 2, 2][Math.floor(r(9) * 6)], spin: [0, 1, 2].map(q => (r(10 + q) - 0.5) * 1.6) });
     let next = Math.max(snap(tt + lo + r(7) * (hi - lo)), tt + 0.5 * lo);
     const d = drops.find(d => d > tt + 0.25 && d < next + 0.25 * lo);   // дроп рядом — меняемся ровно на нём
@@ -1313,7 +1523,7 @@ function frameState(t) {
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
     uKicks: new Float32Array(24), uStabs: new Float32Array(48), uHats: new Float32Array(16), uKickN: 0, uStabN: 0, uHatN: 0,
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
-    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
+    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uLook: [0, 0, 0, 0], uLayoutSeed: 1, uTrack: 0, uRoll: 0, uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
   if (!m) return st;
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
@@ -1328,6 +1538,10 @@ function frameState(t) {
   U.uSceneA = segs.s[from].scene; U.uSeedA = segs.s[from].seed; U.uSceneB = segs.s[to].scene; U.uSeedB = segs.s[to].seed;
   U.uMix = from === to ? 0 : u;
   U.uTrans = segs.s[to].kind; U.uSpin = segs.s[to].spin;
+  // аналог: веса VHS/ризографа/ксерокса/брутализма; макет брутализма и несовмещение — свои у отрезка
+  const amt = [p.vhs, p.riso, p.xerox, p.brutal];
+  U.uLook = p.looks === 'off' ? [0, 0, 0, 0] : p.looks === 'manual' ? amt : segs.s[from].look.map((a, i) => (a * (1 - U.uMix) + segs.s[to].look[i] * U.uMix) * amt[i]);
+  U.uLayoutSeed = segs.s[U.uMix < 0.5 ? from : to].layout >>> 0;
   U.uFx = segs.s[from].fx.map((a, i) => (a * (1 - U.uMix) + segs.s[to].fx[i] * U.uMix) * p.fx);
   U.uAMode = segs.s[from].mode.map((a, i) => a * (1 - U.uMix) + segs.s[to].mode[i] * U.uMix);
   const tone = (k) => k % 2 === 1 ? 1 : 0;
@@ -1352,6 +1566,14 @@ function frameState(t) {
   U.uSmear = Math.min(1, envSum(m.stabs, ts, 0.25, 1.5)) * Math.min(1, p.glitch);
   U.uInvert = Math.min(1, Math.max(gl > 0.5 ? Math.exp(-(ts - (m.stabs.t[gs] ?? -9)) / 0.06) : 0, dg)) * Math.min(1, p.glitch);
   [U.uBlue, U.uRed, U.uGold] = paletteAt(ts);
+  const inks = p.risoInks === 'palette' ? [U.uRed, U.uBlue, [0.1, 0.1, 0.1]] : (RISO_INKS[p.risoInks] || RISO_INKS.fluo).map(hexToRgb);
+  [U.uInk1, U.uInk2, U.uInk3] = inks;
+  U.uRisoScreen = p.risoScreen === 'dots' ? 1 : 0; U.uMisreg = p.misreg;
+  U.uBeatIdx = beatIdx; U.uBarIdx = Math.floor(beatIdx / 4);
+  // VHS: трекинг злится на ударах аккордов и дропе; на дропе кадр срывается вверх
+  U.uTrack = Math.min(1, gl * 0.8) * (U.uLook[0] > 0.01 ? 1 : 0);
+  const age = sec.trans === 'drop' ? ts - sec.t : 99;
+  U.uRoll = age >= 0 && age < 0.45 && U.uLook[0] > 0.01 ? Math.pow(1 - age / 0.45, 2) * 0.6 : 0;
   U.uTension = tensionAt(m, ts);
   U.uFlash = Math.min(1, dropAt(m, ts, 0.5) * p.flashAmt); U.uDropAge = sec.trans === 'drop' ? ts - sec.t : 99;
   if (m.grid) { const bp = (ts - m.beat0) / m.beatLen; U.uBeat = bp - Math.floor(bp); }
