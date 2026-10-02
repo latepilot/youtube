@@ -22,6 +22,9 @@
   header nav { display: flex; gap: 4px; }
   header nav a, header nav b { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-weight: 500; }
   header nav b { color: #111; background: var(--accent); border-color: var(--accent); }
+  .seg { display: flex; gap: 0; margin: 10px 0 6px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; border-radius: 0; padding: 8px 6px; font-weight: 600; background: transparent; color: var(--muted); cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #111; }
   header nav a:hover { color: var(--text); border-color: #4a5058; }
   header span { color: var(--muted); }
   #viewport { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; border-radius: var(--r); overflow: hidden; position: relative; }
@@ -121,6 +124,7 @@
         <p class="note" id="rWhere"></p>
       </div>
     </details>
+    <div id="themeSw" class="seg" title="Тема визуала: свой набор сцен, цветов и эффектов"><button data-t="dub">Даб-техно</button><button data-t="ambient">Эмбиент</button></div>
     <div id="controls"></div>
     <details><summary>Кадр, пресеты</summary>
       <div class="btns">
@@ -141,7 +145,7 @@
    ========================================================================== */
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  scenes: 'auto', seed: 1,
+  theme: 'dub', scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
@@ -153,20 +157,40 @@ const VDEF = Object.freeze({
   bitrate: 25, gopSec: 0.5,
 });
 const SCENE_NAMES = ['три прибора (тёмная)', 'лист с волной (светлая)', 'кольца и волна (тёмная)', 'поле (светлая)'];
+const AMB_SCENE_NAMES = ['мицелий', 'цветок жизни и семена', 'рябь на воде (светлая)', 'туманность и светило'];
+// темы: при переключении эти параметры принимают значения темы (потом их можно крутить)
+const THEME_PRESET = {
+  dub: { ascii: 0.5, glitch: 1, ca: 1, fx: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, palSec: 20, digital: 0.8, freeze: 1, games: 'normal', looks: 'auto', grain: 0.05, bloom: 0 },
+  ambient: { ascii: 0, glitch: 0, ca: 0.35, fx: 0.35, styleMin: 12, styleMax: 24, morphSec: 6, palSec: 45, digital: 0, freeze: 0, games: 'off', looks: 'off', grain: 0.04, bloom: 0.7 },
+};
+const themeDefaults = (th) => ({ ...VDEF, ...THEME_PRESET[th] || {}, theme: th });
+// органические схемы эмбиента: фон, основной, второй, светлый
+const AMB_PALETTES = {
+  moss: { name: 'мох и янтарь', c: ['#0f150d', '#7fa35a', '#c9822f', '#efe2bf'] },
+  biolum: { name: 'биолюминесценция', c: ['#03141a', '#2fe0b0', '#6b4fd8', '#d6fff2'] },
+  ochre: { name: 'охра и терракота', c: ['#1d100a', '#c4572e', '#e2a24c', '#f3e3c4'] },
+  moon: { name: 'индиго и луна', c: ['#080b22', '#3d55b8', '#c58aa0', '#ece6cf'] },
+  amethyst: { name: 'аметист и шалфей', c: ['#120b1a', '#9668d4', '#9fbf94', '#ead39a'] },
+  kelp: { name: 'водоросли и коралл', c: ['#06171a', '#3f8f7a', '#e2735c', '#f2e7d0'] },
+};
 const SCHEMA = [
   { title: 'Кадр', open: false, items: [
     { key: 'res', label: 'Разрешение', type: 'select', options: [['1920x1080', '1920×1080 (1080p)'], ['2560x1440', '2560×1440 (1440p)'], ['3840x2160', '3840×2160 (4K)'], ['1280x720', '1280×720']] },
     { key: 'fps', label: 'Кадров в секунду', type: 'select', num: true, options: [[24, '24'], [25, '25'], [30, '30'], [50, '50'], [60, '60']] },
   ]},
-  { title: 'Тема: даб-техно', open: true, items: [
-    { key: 'scenes', label: 'Сцены', type: 'select', options: [['auto', 'все по очереди, в случайном порядке'], ...SCENE_NAMES.map((n, i) => [String(i), 'только «' + n + '»'])] },
+  { title: 'Стиль', open: true, items: [
+    { key: 'scenes', th: 'dub', label: 'Сцены', type: 'select', options: [['auto', 'все по очереди, в случайном порядке'], ...SCENE_NAMES.map((n, i) => [String(i), 'только «' + n + '»'])] },
+    { key: 'ambScenes', th: 'ambient', label: 'Сцены', type: 'select', options: [['auto', 'все по очереди, в случайном порядке'], ...AMB_SCENE_NAMES.map((n, i) => [String(i), 'только «' + n + '»'])] },
     { key: 'seed', label: 'Вариант (seed)', min: 1, max: 999, step: 1 },
-    { key: 'palMode', label: 'Цветовая схема', type: 'select', options: [['drift', 'плавно меняется (первая — цвета ниже)'], ['fixed', 'не меняется: цвета ниже']] },
+    { key: 'ambPal', th: 'ambient', label: 'Цвета', type: 'select', options: [['drift', 'плавно перетекают по всем схемам'], ...Object.entries(AMB_PALETTES).map(([k, v]) => [k, 'только «' + v.name + '»'])] },
+    { key: 'bloom', th: 'ambient', label: 'Свечение', min: 0, max: 2, step: 0.01 },
+    { key: 'flow', th: 'ambient', label: 'Скорость течения форм', min: 0, max: 3, step: 0.01 },
+    { key: 'palMode', th: 'dub', label: 'Цветовая схема', type: 'select', options: [['drift', 'плавно меняется (первая — цвета ниже)'], ['fixed', 'не меняется: цвета ниже']] },
     { key: 'palSec', label: 'Смена схемы: каждые, с', min: 4, max: 120, step: 1 },
-    { key: 'blue', label: 'Синий', type: 'color' },
-    { key: 'red', label: 'Красный', type: 'color' },
-    { key: 'gold', label: 'Золотой (линии в «кольцах»)', type: 'color' },
-    { key: 'blk', label: 'Размер «пикселя» пятен, px при 1080p', min: 4, max: 40, step: 0.5 },
+    { key: 'blue', th: 'dub', label: 'Синий', type: 'color' },
+    { key: 'red', th: 'dub', label: 'Красный', type: 'color' },
+    { key: 'gold', th: 'dub', label: 'Золотой (линии в «кольцах»)', type: 'color' },
+    { key: 'blk', th: 'dub', label: 'Размер «пикселя» пятен, px при 1080p', min: 4, max: 40, step: 0.5 },
     { key: 'grain', label: 'Зерно', min: 0, max: 0.2, step: 0.001 },
     { key: 'ascii', label: 'ASCII: сколько кадра пересобирать символами', min: 0, max: 1, step: 0.01 },
     { key: 'glitch', label: 'Глитч: сдвиги строк и блоков, шлейфы, инверсия', min: 0, max: 2, step: 0.01 },
@@ -174,7 +198,7 @@ const SCHEMA = [
     { key: 'ca', label: 'Хроматическая аберрация', min: 0, max: 3, step: 0.01 },
     { key: 'styleMin', label: 'Смена стиля: не чаще, чем раз в, с', min: 1, max: 30, step: 0.5 },
     { key: 'styleMax', label: 'Смена стиля: не реже, чем раз в, с', min: 1, max: 60, step: 0.5 },
-    { key: 'morphSec', label: 'Перетекание стилей, с', min: 0.1, max: 6, step: 0.1 },
+    { key: 'morphSec', label: 'Перетекание стилей, с', min: 0.1, max: 12, step: 0.1 },
   ]},
   { title: 'Цифровые глитчи 90-х и аркада', open: true, items: [
     { key: 'digital', label: 'Битые MPEG-блоки, датамош, артефакты сжатия', min: 0, max: 1.5, step: 0.01 },
@@ -652,7 +676,7 @@ function spriteAtlas() {
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 // расписание эпизодов на весь трек
 function gameEpisodes(m, p) {
-  const key = [p.games, p.gameKinds, p.seed, m.trackSeed].join('|');
+  const key = [p.games, p.gameKinds, p.seed, m.trackSeed, p.theme].join('|');
   if (m.gameCache && m.gameCache.key === key) return m.gameCache.eps;
   const eps = [];
   if (p.games !== 'off') {
@@ -769,7 +793,7 @@ void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position
 const FS_MAIN = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes;
-uniform int uSceneA, uSceneB, uTrans; uniform float uMix; uniform vec4 uSeedA, uSeedB; uniform vec3 uSpin;
+uniform int uSceneA, uSceneB, uTrans, uTheme; uniform float uMix, uFlow; uniform vec4 uSeedA, uSeedB; uniform vec3 uSpin, uAmbBg, uAmbPaper;
 uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uStab, uTension, uFlash, uDropAge, uBeat, uBar, uTime, uBlk, uTone;
 uniform float uKickAmt, uStabAmt, uHatAmt;
 uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed, -
@@ -1050,12 +1074,17 @@ vec3 sceneField(vec2 p, vec4 sd){
 }
 
 // опорные элементы сцен: (x, y, размер); порядок — левый, центр, правый
-const vec3 ANC[12] = vec3[12](
+const vec3 ANC[24] = vec3[24](
   vec3(-0.53, 0.0, 0.10), vec3(0.0, 0.0, 0.27), vec3(0.53, 0.0, 0.13),
   vec3(-0.458, 0.0, 0.12), vec3(0.028, 0.0, 0.29), vec3(0.562, 0.0, 0.08),
   vec3(-0.258, 0.0, 0.10), vec3(0.0, 0.0, 0.30), vec3(0.45, 0.0, 0.12),
-  vec3(-0.43, 0.0, 0.12), vec3(0.067, 0.0, 0.20), vec3(0.518, 0.0, 0.10));
-const vec3 BGS[4] = vec3[4](vec3(0.065, 0.066, 0.054), vec3(0.885, 0.876, 0.862), vec3(0.07, 0.064, 0.036), vec3(0.925, 0.925, 0.918));
+  vec3(-0.43, 0.0, 0.12), vec3(0.067, 0.0, 0.20), vec3(0.518, 0.0, 0.10),
+  vec3(-0.45, 0.05, 0.2), vec3(0.0, 0.0, 0.3), vec3(0.45, -0.05, 0.2),
+  vec3(-0.5, 0.0, 0.12), vec3(0.0, 0.0, 0.33), vec3(0.5, 0.0, 0.12),
+  vec3(-0.42, 0.1, 0.2), vec3(0.05, 0.0, 0.3), vec3(0.45, -0.1, 0.2),
+  vec3(-0.45, 0.0, 0.15), vec3(0.0, 0.0, 0.25), vec3(0.45, 0.0, 0.15));
+const vec3 BGD[4] = vec3[4](vec3(0.065, 0.066, 0.054), vec3(0.885, 0.876, 0.862), vec3(0.07, 0.064, 0.036), vec3(0.925, 0.925, 0.918));
+vec3 bgsOf(int id){ return id < 4 ? BGD[id] : id == 6 ? uAmbPaper : uAmbBg; }
 mat2 rot2(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 float vnoise(vec2 x){ vec2 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hc(i, 91u), hc(i + vec2(1.0, 0.0), 91u), f.x), mix(hc(i + vec2(0.0, 1.0), 91u), hc(i + 1.0, 91u), f.x), f.y); }
@@ -1073,7 +1102,128 @@ vec2 featWarp(vec2 q, int id, vec2 M[3], float sM[3], vec3 ang){
   }
   return acc / ws;
 }
-vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : sceneField(p, sd); }
+// ================= ЭМБИЕНТ: органика, природа, эзотерика =================
+// фон схемы uAmbBg, основной uBlue, второй uRed, светлый uGold (в эмбиенте сюда приходит органическая схема)
+float fbm5(vec2 x){ float a = 0.5, s = 0.0; mat2 R = mat2(0.8, 0.6, -0.6, 0.8); for (int i = 0; i < 5; i++) { s += a * vnoise(x); x = R * x * 2.02 + 3.1; a *= 0.5; } return s / 0.97; }
+float aT(){ return uTime * uFlow; }
+// споры и пыльца: редкие светящиеся точки, плывут вверх, мерцают на хэтах
+vec3 spores(vec2 p, vec3 c, float density){
+  vec2 pp = p + vec2(0.0, -aT() * 0.012);
+  float S = 0.09; vec2 cell = floor(pp / S); vec3 acc = vec3(0.0);
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 cc = cell + vec2(i, j); float h = hc(cc, 201u);
+    if (h > density) continue;
+    float h2 = hc(cc, 203u);
+    vec2 pos = (cc + 0.5 + 0.38 * vec2(sin(aT() * 0.21 + h * 40.0), cos(aT() * 0.17 + h2 * 30.0))) * S;
+    float d = length(pp - pos), sz = 0.0016 + 0.0028 * h2;
+    float tw = 0.45 + 0.55 * sin(uTime * (0.6 + h2) + h * 50.0) + 0.8 * min(uHat, 1.0) * uHatAmt * step(0.5, h2);
+    acc += c * (exp(-d * d / (sz * sz)) + 0.12 * exp(-d / (sz * 5.0))) * max(tw, 0.0);
+  }
+  return acc;
+}
+// 4. Мицелий: тёмная земля, течёт дымка, по ней светящиеся нити-жилы; импульсы бегут по жилам на аккордах
+vec3 sceneMyc(vec2 p, vec4 sd){
+  float t = aT() * 0.035;
+  vec2 q = p * 1.7 + sd.xy * 13.0;
+  vec2 w = vec2(fbm5(q + vec2(t, 0.0)), fbm5(q + vec2(5.2, 1.3) - t)) - 0.5;
+  float f = fbm5(q + 2.4 * w + vec2(0.0, t * 0.6));
+  vec3 col = uAmbBg * (0.85 + 0.3 * f);
+  col += uBlue * 0.22 * smoothstep(0.45, 0.95, f) * (0.6 + 0.6 * uLowSlow);
+  col += uRed * 0.12 * smoothstep(0.55, 1.0, fbm5(q * 0.6 - w * 2.0 + 9.0));
+  float r1 = 1.0 - abs(2.0 * fbm5(q * 1.25 + 1.8 * w + 3.0) - 1.0);
+  float r2 = 1.0 - abs(2.0 * fbm5(q * 2.6 - 1.2 * w + 7.0) - 1.0);
+  float vein = smoothstep(0.935, 0.992, r1) + 0.55 * smoothstep(0.955, 0.996, r2);
+  float energy = 0.35 + 0.45 * uMid + 0.8 * min(uStab, 1.2) * uStabAmt + 0.3 * min(uKick, 1.0) * uKickAmt;
+  float pulse = 0.5 + 0.5 * sin(f * 26.0 - uTime * 1.4);
+  vec3 vc = mix(uBlue, uGold, smoothstep(0.45, 0.85, f + 0.25 * pulse));
+  col += vein * vc * energy * (0.55 + 0.7 * pulse);
+  col += spores(p, mix(uGold, uBlue, 0.3), 0.32);
+  return col;
+}
+// 5. Цветок жизни и семена: священная геометрия поверх туманности, спираль семян (золотой угол) дышит
+vec3 sceneFlower(vec2 p, vec4 sd){
+  float br = 1.0 + 0.05 * uLowSlow + 0.025 * sin(uTime * 0.21);
+  float f = fbm5(p * 1.3 + vec2(aT() * 0.02, sd.x * 7.0));
+  vec3 col = uAmbBg + uRed * 0.16 * smoothstep(0.45, 0.95, f) + uBlue * 0.22 * exp(-dot(p, p) * 3.5) * (0.6 + 0.5 * uLowSlow);
+  // спираль семян, как в подсолнухе: n-е семя на радиусе c√n и угле n·137,5°
+  vec2 pr = rot2(aT() * 0.025 + sd.y * 6.0) * p / br;
+  float cR = 0.0118, r = length(pr), n0 = (r / cR) * (r / cR), glow = 0.0;
+  float st = min(uStab, 1.2) * uStabAmt;
+  for (int k = -9; k <= 9; k++) {
+    float n = floor(n0) + float(k); if (n < 1.0 || n > 1100.0) continue;
+    float aa = n * 2.39996323; vec2 pt = cR * sqrt(n) * vec2(cos(aa), sin(aa));
+    float d = length(pr - pt);
+    float wave = pow(0.5 + 0.5 * sin(sqrt(n) * 0.9 - uTime * 1.1), 6.0);
+    float lit = 0.25 + 0.75 * wave + 0.9 * st * exp(-abs(sqrt(n) * cR - 0.06 - 0.25 * fract(uTime * 0.25)) * 30.0);
+    float sz = 0.0022 + 0.0016 * wave;
+    glow += (1.0 - smoothstep(sz * 0.5, sz, d)) * lit + exp(-d / (sz * 2.5)) * 0.07 * lit;
+  }
+  col += glow * mix(uGold, uBlue, smoothstep(0.15, 0.42, r)) * smoothstep(0.48, 0.3, r);
+  // цветок жизни: 19 окружностей на шестиугольной решётке, обрезанные большим кругом
+  float R = 0.105 * br; vec2 fp = rot2(-aT() * 0.015 + sd.z * 6.0) * p;
+  float lines = 0.0;
+  for (int i = 0; i < 19; i++) {
+    vec2 c = i == 0 ? vec2(0.0) : i < 7 ? vec2(cos(float(i) * 1.0472), sin(float(i) * 1.0472))
+           : i < 13 ? 2.0 * vec2(cos(float(i) * 1.0472), sin(float(i) * 1.0472)) : 1.7320508 * vec2(cos(float(i) * 1.0472 + 0.5236), sin(float(i) * 1.0472 + 0.5236));
+    lines += 1.0 - smoothstep(LW * 0.7, LW * 0.7 + PX * 1.2, abs(length(fp - c * R) - R));
+  }
+  lines *= smoothstep(3.0 * R + 0.004, 3.0 * R - 0.004, length(fp));
+  lines += (1.0 - smoothstep(LW, LW + PX * 1.2, abs(length(fp) - 3.0 * R))) + 0.6 * (1.0 - smoothstep(LW, LW + PX * 1.2, abs(length(fp) - 3.35 * R)));
+  col += min(lines, 1.4) * uGold * (0.32 + 0.3 * uMid + 0.4 * st);
+  col += spores(p, uGold, 0.18);
+  return col;
+}
+// 6. Рябь на воде: светлая бумага, изолинии медленного рельефа (как топокарта), капли на аккордах и хэтах
+vec3 sceneTopo(vec2 p, vec4 sd){
+  vec3 paper = uAmbPaper, ink = mix(vec3(0.1, 0.11, 0.09), uBlue * 0.45, 0.35);
+  float t = aT() * 0.025;
+  float h = fbm5(p * 1.25 + sd.xy * 9.0 + vec2(t, -t * 0.7)) + 0.22 * fbm5(p * 3.1 - vec2(t * 1.4, 0.0));
+  for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
+    vec2 pos = vec2(fract(s.w * 7.13) - 0.5, fract(s.w * 3.71) - 0.5) * vec2(1.4, 0.75);
+    float rr = length(p - pos), front = s.x * 0.16;
+    h += sin((rr - front) * 85.0) * exp(-s.x * 0.8) * exp(-abs(rr - front) * 14.0) * s.y * 0.05 * uStabAmt;
+  }
+  for (int i = 0; i < 4; i++) { if (i >= uHatN) break; vec4 s = uHats[i];
+    vec2 pos = vec2(hc(vec2(s.z, 1.0), 211u) - 0.5, hc(vec2(s.z, 2.0), 211u) - 0.5) * vec2(1.5, 0.8);
+    float rr = length(p - pos), front = s.x * 0.12;
+    h += sin((rr - front) * 140.0) * exp(-s.x * 3.0) * exp(-abs(rr - front) * 30.0) * 0.02 * uHatAmt;
+  }
+  float N = 30.0 + 8.0 * uLowSlow, x = h * N, fw = fwidth(x);
+  float d = abs(fract(x + 0.5) - 0.5), line = 1.0 - smoothstep(fw * 0.6, fw * 1.6, d);
+  float major = step(abs(mod(floor(x + 0.5), 5.0)), 0.5);
+  vec3 col = mix(paper, mix(paper, mix(uGold, uRed, smoothstep(0.35, 0.75, h)), 0.22), smoothstep(0.3, 0.8, h));
+  col = mix(col, ink, line * mix(0.5, 0.95, major));
+  // точки-отметки высот на гребнях
+  col = mix(col, uRed * 0.8, (1.0 - smoothstep(0.0025, 0.004, length(fract(p / 0.16 + 0.5) - 0.5) * 0.16)) * step(0.72, h) * 0.8);
+  return col;
+}
+// 7. Туманность и светило: текучие чернила в воде (тройное искривление шума), луна с кратерами, тонкие орбиты
+vec3 sceneNebula(vec2 p, vec4 sd){
+  float t = aT() * 0.03;
+  vec2 q = p * 1.15 + sd.xy * 11.0;
+  vec2 a = vec2(fbm5(q + vec2(0.0, t)), fbm5(q + vec2(5.2, 1.3) + t));
+  vec2 b = vec2(fbm5(q + 3.0 * a + vec2(1.7, 9.2) - t * 0.5), fbm5(q + 3.0 * a + vec2(8.3, 2.8)));
+  float f = fbm5(q + 3.0 * b);
+  vec3 col = mix(uAmbBg, uBlue * 0.55, clamp(f * f * 1.8, 0.0, 1.0));
+  col = mix(col, uRed * 0.75, clamp(length(a - 0.5) * 1.3, 0.0, 1.0) * 0.55);
+  col = mix(col, uGold * 0.9, clamp(b.x * b.x * 1.4, 0.0, 1.0) * 0.35 * (0.6 + 0.6 * uLowSlow));
+  col *= 0.55 + 0.6 * f;
+  vec2 oc = vec2(0.0); float orR = 0.082 * (1.0 + 0.05 * uLowSlow + 0.03 * min(uKick, 1.0) * uKickAmt);
+  float dO = length(p - oc);
+  col += uGold * exp(-max(dO - orR, 0.0) * 13.0) * 0.28 * (0.7 + 0.5 * uLow);
+  vec3 moon = mix(uGold, vec3(1.0), 0.35) * (0.78 + 0.3 * fbm5(p * 22.0 + sd.zw)) * (0.85 + 0.15 * smoothstep(orR, -orR, p.x + p.y));
+  col = mix(col, moon, 1.0 - smoothstep(orR - PX, orR + PX, dO));
+  float st = min(uStab, 1.2) * uStabAmt;
+  float ang = atan(p.y, p.x);
+  col += uGold * 0.3 * (ring(p, oc, 0.19, LW) * step(0.0, sin(ang * 24.0 + uTime * 0.2)) + ring(p, oc, 0.31, LW) * 0.7 + ring(p, oc, 0.43, LW * 0.8) * 0.4 * step(0.6, sin(ang * 3.0 - uTime * 0.1)));
+  for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
+    col += uGold * ring(p, oc, orR + s.x * 0.22, LW) * s.y * exp(-s.x / 1.4) * 0.5 * uStabAmt * smoothstep(0.0, 0.05, s.x); }
+  col += spores(p, uGold, 0.25);
+  return col;
+}
+
+vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : id == 3 ? sceneField(p, sd)
+  : id == 4 ? sceneMyc(p, sd) : id == 5 ? sceneFlower(p, sd) : id == 6 ? sceneTopo(p, sd) : sceneNebula(p, sd); }
 // мелкие детали поверх любой сцены: полоска-спектр, развёртка по такту, спутники, метки по углам
 vec3 details(vec3 c, vec2 p){
   vec3 lc = mix(vec3(0.9, 0.89, 0.85), vec3(0.08, 0.08, 0.07), uTone);
@@ -1133,14 +1283,14 @@ void main(){
     // новая сцена проступает растеканием: по мягкому шуму, яркие элементы новой — раньше остальных
     float n = 0.75 * fbm(p * 2.2 + vec2(uTime * 0.12, -uTime * 0.07)) + 0.25 * vnoise(p * 9.0 - uTime * 0.3);
     if (uTrans == 1) n = 0.7 * clamp(length(p) / 0.9, 0.0, 1.0) + 0.3 * n;
-    n = clamp((n - 0.5) * 2.2 + 0.5 - 0.3 * clamp(length(cb - BGS[uSceneB]) * 1.4, 0.0, 1.0) + 0.1, 0.0, 1.0);
+    n = clamp((n - 0.5) * 2.2 + 0.5 - 0.3 * clamp(length(cb - bgsOf(uSceneB)) * 1.4, 0.0, 1.0) + 0.1, 0.0, 1.0);
     float fr = e * 1.2 - 0.1, m = smoothstep(n - 0.045, n + 0.045, fr);
     c = mix(ca, cb, m);
     // по кромке растекания — тонкий светящийся край цвета схемы
     float edge = (1.0 - smoothstep(0.0, 0.022, abs(fr - n))) * bump;
     c = mix(c, mix(uBlue, vec3(1.0), 0.45), edge * 0.55);
   } else c = scene(uSceneA, pa, uSeedA);
-  c = details(c, p);
+  if (uTheme == 0) c = details(c, p);
   // дроп: из центра расходится тонкая ударная волна
   if (uFlash > 0.0) {
     float r = uDropAge * 1.5, w = 0.002 + uDropAge * 0.01;
@@ -1239,7 +1389,7 @@ void main(){
   float rr = length(cn), rph = rr * 22.0 - t * 4.0 - 3.0 * min(uKick, 1.0);
   float fC = step(thr * 0.9 + 0.1, 0.5 + 0.5 * cos(rph)) * step(rr, 0.75);
   float cellOn = max(max(fB * uAMode.x, fW * uAMode.y), max(fR * uAMode.z, fC * uAMode.w));
-  cellOn = step(0.5, cellOn);
+  cellOn = step(0.5, cellOn) * step(0.001, uAscii);
   if (cellOn > 0.5) {
     vec2 cc = (cell + 0.5) * cs, inC = (frag - cell * cs) / cs;
     vec3 cc3 = tap(warp(cc));
@@ -1449,7 +1599,7 @@ const FS_FINAL = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes; uniform sampler2D uSrc;
 uniform vec4 uLook;
-uniform float uTime, uHigh, uLow, uTrack, uRoll, uGrain, uDig, uMosh, uMoshAge;
+uniform float uTime, uHigh, uLow, uTrack, uRoll, uGrain, uDig, uMosh, uMoshAge, uBloom, uTone;
 uniform uint uFrame, uSeed, uLayoutSeed, uDigSeed, uMoshSeed;
 uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
 out vec4 o;
@@ -1528,6 +1678,14 @@ void main(){
       col = clamp(yiq2rgb(vec3(floor(y.x * 6.0) / 6.0, a.yz * 2.2 + (vec2(h2(mb, uDigSeed + 14u), h2(mb, uDigSeed + 15u)) - 0.5) * 0.5)), 0.0, 1.0);
     }
   }
+  // свечение (эмбиент): яркое расплывается мягким ореолом — три кольца отсчётов
+  if (uBloom > 0.01) {
+    vec3 g = vec3(0.0);
+    for (int i = 0; i < 12; i++) { float a = float(i) * 0.5236 + 0.26;
+      for (int k = 0; k < 3; k++) { float r = float[3](5.0, 14.0, 34.0)[k], w = float[3](0.5, 0.33, 0.2)[k];
+        g += max(tap(frag + vec2(cos(a), sin(a)) * r * u1) - 0.42, 0.0) * w; } }
+    col += g / 12.0 * uBloom * 1.6 * (1.0 - 0.9 * uTone);   // на светлой бумаге почти не светит
+  }
   // развёртка (без виньетки: никакого затемнения по краям)
   col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1)));
   vec2 pix = vec2(frag.x, uRes.y - frag.y);
@@ -1565,7 +1723,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1717,6 +1875,16 @@ const PALETTES = [
   ['#00e0a4', '#ff2e88', '#e9ff4a'], ['#38c8ff', '#7a5cff', '#d6ecff'], ['#ff7a1a', '#ff2442', '#ffd27a'],
   ['#8a3cff', '#ff4fd8', '#c6b4ff'], ['#9cff2e', '#2ee6ff', '#e4dcc4'], ['#19c2b0', '#ff6b3d', '#e8cfa0'], ['#ffffff', '#ff3b30', '#a0a0a0'],
 ];
+// органическая схема в момент ts: [фон, основной, второй, светлый]; при «перетекают» — по кругу всех схем
+function ambPaletteAt(ts) {
+  const p = state.p, keys = Object.keys(AMB_PALETTES), conv = (k) => AMB_PALETTES[k].c.map(hexToRgb);
+  if (p.ambPal !== 'drift' && AMB_PALETTES[p.ambPal]) return conv(p.ambPal);
+  const n = keys.length, off = Math.floor(hash01(p.seed + (state.m ? state.m.trackSeed : 0), 79) * n);
+  const x = Math.max(0, ts) / Math.max(1, p.palSec), k = Math.floor(x), f = x - k;
+  let w = Math.min(1, Math.max(0, (f - 0.4) / 0.6)); w = w * w * (3 - 2 * w);
+  const a = conv(keys[(off + k) % n]), b = conv(keys[(off + k + 1) % n]);
+  return a.map((c, i) => c.map((v, j) => v * (1 - w) + b[i][j] * w));
+}
 function paletteAt(ts) {
   const p = state.p, own = [p.blue, p.red, p.gold].map(hexToRgb);
   if (p.palMode !== 'drift') return own;
@@ -1730,25 +1898,29 @@ function paletteAt(ts) {
 // «аналог» отрезка: [VHS, ризограф, ксерокс, брутализм]; часть отрезков идёт чистыми
 const LOOKS = [[0, 0, 0, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [0, 1, 0, 1], [1, 0, 0, 1], [0, 0, 1, 1], [1, 1, 0, 0], [0, 1, 0, 0], [1, 0, 0, 0]];
 const RISO_INKS = { fluo: ['#ff48b0', '#0078bf', '#ffe800'], redteal: ['#f15060', '#00838a', '#1a1a1a'], federal: ['#ff6c2f', '#3d5588', '#ffb511'], mono: ['#e8382a', '#1a1a1a', '#f4f0e6'] };
+// эффекты стиля эмбиента: без дизеринга, мягкие — калейдоскоп-зеркало, волна, растр точками изредка
+const AMB_FX = [[0, 0, 0, 0], [0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0.5], [1, 0, 0, 0.4], [0, 0, 0.5, 0]];
 const ASCII_MODES = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [1, 1, 0, 0], [0, 1, 0, 1], [0, 0, 1, 1]];
 function styleSegments(m) {
-  const p = state.p, key = [p.scenes, p.seed, p.styleMin, p.styleMax, p.bpmFix, p.gridShiftMs].join('|');
+  const p = state.p, amb = p.theme === 'ambient', scSel = amb ? p.ambScenes : p.scenes, base = amb ? 4 : 0;
+  const key = [p.theme, scSel, p.seed, p.styleMin, p.styleMax, p.bpmFix, p.gridShiftMs].join('|');
   if (m.segCache && m.segCache.key === key) return m.segCache;
   const lo = Math.max(0.5, Math.min(p.styleMin, p.styleMax)), hi = Math.max(lo, p.styleMin, p.styleMax);
   const snap = (x) => m.grid ? m.beat0 + Math.round((x - m.beat0) / m.beatLen) * m.beatLen : x;
   const drops = m.sections.filter(s => s.trans === 'drop').map(s => s.t);
   const t = [], s = [];
-  let tt = 0, scene = p.scenes === 'auto' ? Math.floor(hash01(p.seed + m.trackSeed, 41) * 4) : +p.scenes, mode = -1;
+  let tt = 0, scene = scSel === 'auto' ? Math.floor(hash01(p.seed + m.trackSeed, 41) * 4) : +scSel, mode = -1;
   const S0 = (p.seed * 7919 + m.trackSeed) | 0;
   for (let k = 0; tt < m.duration && k < 100000; k++) {
     const r = (q) => hash01(S0 + k, q);
-    if (k > 0 && p.scenes === 'auto') scene = (scene + 1 + Math.floor(r(5) * 3)) % 4;   // любая другая из трёх
+    if (k > 0 && scSel === 'auto') scene = (scene + 1 + Math.floor(r(5) * 3)) % 4;   // любая другая из трёх
     let nm = Math.floor(r(6) * ASCII_MODES.length); if (nm === mode) nm = (nm + 1) % ASCII_MODES.length; mode = nm;
     const isDrop = drops.some(d => Math.abs(d - tt) < 1e-6);
-    t.push(tt); s.push({ scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], fx: FX_MODES[Math.floor(r(8) * FX_MODES.length)], trans: isDrop ? 'drop' : 'shift',
+    const fxSet = amb ? AMB_FX : FX_MODES;
+    t.push(tt); s.push({ scene: base + scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], fx: fxSet[Math.floor(r(8) * fxSet.length)], trans: isDrop ? 'drop' : 'shift',
       // тип перехода в этот отрезок: 0 — морфинг элементов, 1 — пролёт сквозь центр (и всегда на дропе), 2 — жидкость
       look: LOOKS[Math.floor(r(13) * LOOKS.length)], layout: Math.floor(r(14) * 1e6),
-      kind: isDrop ? 1 : [0, 0, 0, 1, 2, 2][Math.floor(r(9) * 6)], spin: [0, 1, 2].map(q => (r(10 + q) - 0.5) * 1.6) });
+      kind: amb ? [0, 2, 2, 1, 0, 2][Math.floor(r(9) * 6)] : isDrop ? 1 : [0, 0, 0, 1, 2, 2][Math.floor(r(9) * 6)], spin: [0, 1, 2].map(q => (r(10 + q) - 0.5) * 1.6) });
     let next = Math.max(snap(tt + lo + r(7) * (hi - lo)), tt + 0.5 * lo);
     const d = drops.find(d => d > tt + 0.25 && d < next + 0.25 * lo);   // дроп рядом — меняемся ровно на нём
     tt = d ?? next;
@@ -1761,7 +1933,7 @@ function fmt(t) { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.f
 const WAVE_COLS = 256, WAVE_SPAN = 6;   // «волна» в кадре: 6 с вокруг текущего момента
 // события цифровых глитчей на весь трек: всплески битых блоков, застывания и заикания кадра, датамош на сменах сцен
 function digitalEvents(m, p) {
-  const key = [p.seed, p.digital, p.freeze, p.styleMin, p.styleMax, p.morphSec].join('|');
+  const key = [p.theme, p.seed, p.digital, p.freeze, p.styleMin, p.styleMax, p.morphSec].join('|');
   if (m.digCache && m.digCache.key === key) return m.digCache;
   const r = rng(m.trackSeed * 13 + p.seed * 101 + 9), bursts = [], freezes = [], moshes = [];
   if (p.digital > 0) for (let t = 1 + r() * 4; t < m.duration; t += (2 + r() * 6) / Math.min(1.5, p.digital)) bursts.push([t, t + 0.12 + r() * 0.5]);
@@ -1810,10 +1982,15 @@ function frameState(t) {
   U.uLayoutSeed = segs.s[U.uMix < 0.5 ? from : to].layout >>> 0;
   U.uFx = segs.s[from].fx.map((a, i) => (a * (1 - U.uMix) + segs.s[to].fx[i] * U.uMix) * p.fx);
   U.uAMode = segs.s[from].mode.map((a, i) => a * (1 - U.uMix) + segs.s[to].mode[i] * U.uMix);
-  const tone = (k) => k % 2 === 1 ? 1 : 0;
+  const tone = (k) => k < 4 ? k % 2 : k === 6 ? 1 : 0;
   U.uTone = tone(U.uSceneA) * (1 - U.uMix) + tone(U.uSceneB) * U.uMix;
   const BG = [[0.065, 0.066, 0.054], [0.885, 0.876, 0.862], [0.07, 0.064, 0.036], [0.925, 0.925, 0.918]];
-  U.uBgA = BG[U.uSceneA]; U.uBgB = BG[U.uSceneB];
+  // эмбиент: фон — из органической схемы, «рябь» — тёплая бумага
+  const amb = ambPaletteAt(ts);
+  U.uTheme = p.theme === 'ambient' ? 1 : 0; U.uAmbBg = amb[0]; U.uFlow = p.flow; U.uBloom = p.bloom;
+  U.uAmbPaper = [0, 1, 2].map(i => 0.94 * [1, 0.965, 0.89][i] * 0.88 + amb[3][i] * 0.12);
+  const bgOf = (k) => k < 4 ? BG[k] : k === 6 ? U.uAmbPaper : amb[0];
+  U.uBgA = bgOf(U.uSceneA); U.uBgB = bgOf(U.uSceneB);
   if (m.grid) { const bp = ((ts - m.beat0) / m.beatLen - m.barPhase) / 4; U.uBar = bp - Math.floor(bp); }
   // ASCII: полосы меняются на каждой доле; на брейках больше, в грувах меньше; хэты и верх добавляют
   const beatIdx = m.grid ? Math.floor((ts - m.beat0) / m.beatLen) : Math.floor(ts * 2);
@@ -1831,7 +2008,7 @@ function frameState(t) {
   // шлейфы — пока звучит аккорд; инверсия блоков — короткая вспышка на ударе аккорда и на дропе
   U.uSmear = Math.min(1, envSum(m.stabs, ts, 0.25, 1.5)) * Math.min(1, p.glitch);
   U.uInvert = Math.min(1, Math.max(gl > 0.5 ? Math.exp(-(ts - (m.stabs.t[gs] ?? -9)) / 0.06) : 0, dg)) * Math.min(1, p.glitch);
-  [U.uBlue, U.uRed, U.uGold] = paletteAt(ts);
+  [U.uBlue, U.uRed, U.uGold] = p.theme === 'ambient' ? amb.slice(1) : paletteAt(ts);
   // цифровые глитчи: случайные всплески, удары аккордов, дроп; датамош — на части смен сцены
   const dev = digitalEvents(m, p);
   let dig = 0; for (const [a, b] of dev.bursts) if (ts >= a && ts < b) dig = 1;
@@ -2046,7 +2223,7 @@ function redraw() {
   if (state.m && st.sec) {
     const m = state.m, beatPos = (st.ts - m.beat0) / m.beatLen;
     $('stBeat').textContent = m.grid ? `${(60 / m.beatLen).toFixed(2)} BPM · такт ${Math.floor((Math.floor(beatPos) - m.barPhase) / 4) + 1}` : 'без сетки';
-    $('stSec').textContent = `секция: ${({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[st.sec.type] || st.sec.type}${st.sec.n ? ' ' + st.sec.n : ''} · сцена: ${SCENE_NAMES[st.U.uSceneA]}`;
+    $('stSec').textContent = `секция: ${({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[st.sec.type] || st.sec.type}${st.sec.n ? ' ' + st.sec.n : ''} · сцена: ${[...SCENE_NAMES, ...AMB_SCENE_NAMES][st.U.uSceneA]}`;
   }
   drawTimelineTop(t);
 }
@@ -2100,7 +2277,7 @@ function drawTimelineTop(t) {
 function buildControls() {
   const root = $('controls');
   for (const sec of SCHEMA) {
-    const d = document.createElement('details'); d.open = sec.open;
+    const d = document.createElement('details'); d.open = sec.open; if (sec.th) d.dataset.th = sec.th;
     d.innerHTML = `<summary>${sec.title}</summary>`;
     for (const it of sec.items) {
       const k = it.k || 1; let el;
@@ -2119,15 +2296,26 @@ function buildControls() {
         el.innerHTML = `<label>${it.label}<i title="Вернуть по умолчанию">↺</i></label><input type="range" min="${it.min * k}" max="${it.max * k}" step="${it.step * k}"><input type="number" step="any">`;
         const [rg, nb] = el.querySelectorAll('input'), round = (v) => +(+v).toFixed(6);
         rg.oninput = () => set(it.key, round(rg.value / k)); nb.onchange = () => set(it.key, round(nb.value / k));
-        el.querySelector('i').onclick = () => set(it.key, VDEF[it.key]);
+        el.querySelector('i').onclick = () => set(it.key, themeDefaults(state.p.theme)[it.key]);
         controls[it.key] = () => { const v = round(state.p[it.key] * k); rg.value = v; nb.value = v; };
       }
+      if (it.th) el.dataset.th = it.th;
       d.appendChild(el);
     }
     root.appendChild(d);
   }
 }
-function syncControls() { for (const f of Object.values(controls)) f(); }
+function syncControls() {
+  for (const f of Object.values(controls)) f();
+  document.querySelectorAll('#controls [data-th]').forEach(el => { el.style.display = el.dataset.th === state.p.theme ? '' : 'none'; });
+  document.querySelectorAll('#themeSw button').forEach(b => b.classList.toggle('on', b.dataset.t === state.p.theme));
+}
+// переключатель темы: параметры темы — к её значениям, остальное (лого, рендер, реакция) как было
+function setTheme(th) {
+  if (state.p.theme === th) return;
+  Object.assign(state.p, THEME_PRESET[th], { theme: th });
+  syncControls(); redraw();
+}
 const MAP_KEYS = new Set(['bpmFix', 'gridShiftMs']);
 function set(key, val) {
   state.p[key] = val;
@@ -2299,7 +2487,8 @@ function initUI() {
   $('bPng').onclick = () => { state.fullRes = true; seek(currentT()); const url = cv.toDataURL('image/png'); state.fullRes = false; download(url, `${baseName()}-${frameIndex(currentT())}.png`); redraw(); };
   $('bSave').onclick = savePreset;
   $('presetIn').onchange = (e) => { const f = e.target.files[0]; if (f) f.text().then(t => applyPreset(JSON.parse(t))).catch(err => alert('Не читается пресет: ' + err.message)); e.target.value = ''; };
-  $('bReset').onclick = () => { if (confirm('Вернуть все параметры по умолчанию?')) applyPreset({ params: VDEF }); };
+  $('bReset').onclick = () => { if (confirm('Вернуть все параметры по умолчанию?')) applyPreset({ params: themeDefaults(state.p.theme) }); };
+  document.querySelectorAll('#themeSw button').forEach(b => b.onclick = () => setTheme(b.dataset.t));
   drawTimelineBase(); setT(0);
   ready.then(() => redraw());
   detectStudio();
