@@ -117,7 +117,8 @@
   <aside id="panel">
     <details open><summary>Трек</summary>
       <div class="drops">
-        <label class="drop" data-kind="audio"><b>Трек</b><small>WAV / AIFF / FLAC / MP3</small><button class="x" title="Убрать">×</button><input type="file" accept="audio/*,.flac,.aif,.aiff,.wav"></label>
+        <label class="drop" data-kind="audio"><b>Трек</b><small>WAV / AIFF / FLAC / MP3</small><button class="x" title="Убрать">×</button><input type="file" accept="audio/*,video/*,.flac,.aif,.aiff,.wav,.mp4,.mov"></label>
+        <label class="drop" data-kind="video" title="Своё видео: эффекты лягут на него. Если трека нет, звук возьмётся из видео"><b>Видео</b><small>MP4 / MOV / WebM</small><button class="x" title="Убрать">×</button><input type="file" accept="video/*,.mp4,.mov,.webm,.m4v"></label>
         <label class="drop" data-kind="logo"><b>Логотип</b><small>стандартный · перетащи свой</small><button class="x" title="Убрать">×</button><input type="file" accept="image/*"></label>
       </div>
       <p class="note" id="anStatus">Трек не загружен.</p>
@@ -157,7 +158,7 @@
    ========================================================================== */
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  theme: 'dub', lfo: {}, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
+  theme: 'dub', lfo: {}, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
@@ -181,7 +182,7 @@ const themeDefaults = (th) => ({ ...VDEF, ...THEME_PRESET[th] || {}, theme: th }
 // LFO: у каждого «силового» параметра может быть своё медленное колебание вокруг значения ползунка.
 // Глубина — доля диапазона ползунка (±половина), период в секундах, форма: синус, треугольник, плавный случайный.
 // Не модулируются параметры, которые задают структуру (смены сцен, события, seed, рендер): иначе кадр «прыгал» бы.
-const LFO_KEYS = new Set(['grain', 'ascii', 'glitch', 'fx', 'ca', 'bloom', 'digital', 'vhs', 'riso', 'xerox', 'brutal', 'misreg', 'kickAmt', 'hatAmt', 'stabAmt', 'flashAmt', 'blk']);
+const LFO_KEYS = new Set(['vidDis', 'vidCell', 'vidPix', 'grain', 'ascii', 'glitch', 'fx', 'ca', 'bloom', 'digital', 'vhs', 'riso', 'xerox', 'brutal', 'misreg', 'kickAmt', 'hatAmt', 'stabAmt', 'flashAmt', 'blk']);
 const LFO_SHAPES = [['sine', 'синус'], ['tri', 'треугольник'], ['random', 'плавный случайный']];
 function lfoWave(key, l, t, seed) {
   const kh = [...key].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261) >>> 0;
@@ -237,6 +238,17 @@ const SCHEMA = [
     { key: 'styleMin', label: 'Смена стиля: не чаще, чем раз в, с', min: 1, max: 30, step: 0.5 },
     { key: 'styleMax', label: 'Смена стиля: не реже, чем раз в, с', min: 1, max: 60, step: 0.5 },
     { key: 'morphSec', label: 'Перетекание стилей, с', min: 0.1, max: 12, step: 0.1 },
+  ]},
+  { title: 'Своё видео', open: true, vidOnly: true, items: [
+    { key: 'vidOn', label: 'Показывать видео вместо сцен', type: 'check' },
+    { key: 'vidDis', label: 'Расщепление: сколько кадра уходит в пиксели и символы', min: 0, max: 1, step: 0.01 },
+    { key: 'vidCell', label: 'Размер символа, px при 1080p', min: 5, max: 40, step: 0.5 },
+    { key: 'vidPix', label: 'Размер пикселя, px при 1080p', min: 4, max: 64, step: 1 },
+    { key: 'vidCol', label: 'Цвет символов', type: 'select', options: [['video', 'из кадра'], ['palette', 'из цветовой схемы'], ['mono', 'чёрно-белый']] },
+    { key: 'vidFlow', label: 'Скорость, с которой плывут зоны', min: 0, max: 3, step: 0.01 },
+    { key: 'vidReact', label: 'Реакция на трек (кик, верха)', min: 0, max: 2, step: 0.01 },
+    { key: 'vidSpeed', label: 'Скорость видео', min: 0.25, max: 2, step: 0.01 },
+    { key: 'vidOffset', label: 'Сдвиг видео относительно трека, с', min: -60, max: 60, step: 0.04 },
   ]},
   { title: 'Цифровые глитчи 90-х и аркада', open: true, items: [
     { key: 'digital', label: 'Битые MPEG-блоки, датамош, артефакты сжатия', min: 0, max: 1.5, step: 0.01 },
@@ -910,6 +922,7 @@ uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed
 uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, номер эха, seed
 uniform vec4 uPads[8]; uniform int uPadN;     // долгие события для эмбиента (до 16 с): возраст, сила, seed
 uniform float uPad, uFlowT;
+uniform sampler2D uVideo; uniform vec2 uVidRes;               // своё видео (сцена 11)
 uniform vec4 uGeo[48]; uniform vec4 uGeoP, uGeoS, uGeoR, uGeoX; uniform int uGeoBoth;   // геометрия (см. geoShape)                    // медленная огибающая пэда/хвоста и время течения (интеграл скорости)
 uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, номер, -
 uniform sampler2D uWave;                       // 256 колонок вокруг «сейчас»: r — вся громкость, g — низ, b — середина, a — верх
@@ -1187,7 +1200,7 @@ vec3 sceneField(vec2 p, vec4 sd){
 }
 
 // опорные элементы сцен: (x, y, размер); порядок — левый, центр, правый
-const vec3 ANC[33] = vec3[33](
+const vec3 ANC[36] = vec3[36](
   vec3(-0.53, 0.0, 0.10), vec3(0.0, 0.0, 0.27), vec3(0.53, 0.0, 0.13),
   vec3(-0.458, 0.0, 0.12), vec3(0.028, 0.0, 0.29), vec3(0.562, 0.0, 0.08),
   vec3(-0.258, 0.0, 0.10), vec3(0.0, 0.0, 0.30), vec3(0.45, 0.0, 0.12),
@@ -1198,9 +1211,10 @@ const vec3 ANC[33] = vec3[33](
   vec3(-0.45, 0.0, 0.15), vec3(0.0, 0.0, 0.25), vec3(0.45, 0.0, 0.15),
   vec3(-0.42, 0.0, 0.12), vec3(0.0, 0.0, 0.34), vec3(0.42, 0.0, 0.12),
   vec3(-0.42, 0.0, 0.12), vec3(0.0, 0.0, 0.34), vec3(0.42, 0.0, 0.12),
-  vec3(-0.35, 0.0, 0.18), vec3(0.0, 0.0, 0.35), vec3(0.35, 0.0, 0.18));
+  vec3(-0.35, 0.0, 0.18), vec3(0.0, 0.0, 0.35), vec3(0.35, 0.0, 0.18),
+  vec3(-0.45, 0.0, 0.2), vec3(0.0, 0.0, 0.3), vec3(0.45, 0.0, 0.2));
 const vec3 BGD[4] = vec3[4](vec3(0.065, 0.066, 0.054), vec3(0.885, 0.876, 0.862), vec3(0.07, 0.064, 0.036), vec3(0.925, 0.925, 0.918));
-vec3 bgsOf(int id){ return id < 4 ? BGD[id] : id == 6 ? uAmbPaper : uAmbBg; }
+vec3 bgsOf(int id){ return id < 4 ? BGD[id] : id == 11 ? vec3(0.0) : id == 6 ? uAmbPaper : uAmbBg; }
 mat2 rot2(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 // шум по готовой текстуре 256×256 (один отсчёт вместо четырёх хешей): гладкая интерполяция через сдвиг координаты
 uniform sampler2D uNoise;
@@ -1381,8 +1395,14 @@ vec3 sceneGeo(vec2 p, vec4 sd){
   return col;
 }
 
+// своё видео: кадр заполняет экран (лишнее обрезается по краям), дышит вместе с кадром
+vec3 sceneVideo(vec2 p){
+  float A = uRes.x / uRes.y, V = uVidRes.x / max(uVidRes.y, 1.0), s = V > A ? 1.0 : A / V;
+  vec2 uv = vec2(p.x / (V * s), -p.y / s) + 0.5;
+  return texture(uVideo, clamp(uv, 0.0, 1.0)).rgb;
+}
 vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : id == 3 ? sceneField(p, sd)
-  : id == 4 ? sceneMyc(p, sd) : id == 6 ? sceneTopo(p, sd) : id == 7 ? sceneNebula(p, sd) : sceneGeo(p, sd); }
+  : id == 4 ? sceneMyc(p, sd) : id == 6 ? sceneTopo(p, sd) : id == 7 ? sceneNebula(p, sd) : id == 11 ? sceneVideo(p) : sceneGeo(p, sd); }
 // мелкие детали поверх любой сцены: полоска-спектр, развёртка по такту, спутники, метки по углам
 vec3 details(vec3 c, vec2 p){
   vec3 lc = mix(vec3(0.9, 0.89, 0.85), vec3(0.08, 0.08, 0.07), uTone);
@@ -1454,7 +1474,7 @@ void main(){
     c = mix(c, mix(uBlue, vec3(1.0), 0.45), edge * 0.55);
     }
   } else c = scene(uSceneA, pa, uSeedA);
-  if (uTheme == 0) c = details(c, p);
+  if (uTheme == 0 && uSceneA != 11) c = details(c, p);
   // дроп: из центра расходится тонкая ударная волна
   if (uFlash > 0.0) {
     float r = uDropAge * 1.5, w = 0.002 + uDropAge * 0.01;
@@ -1493,6 +1513,52 @@ vec2 warp(vec2 f){
   }
   return g;
 }
+const float G_BAR = ${GLYPHS.indexOf('|')}.0, G_SL = ${GLYPHS.indexOf('/')}.0, G_BSL = ${GLYPHS.indexOf('\\')}.0, G_DASH = ${GLYPHS.indexOf('-')}.0;
+const float DENS[10] = float[10](${[...' .:-=+*#%@'].map(c => GLYPHS.indexOf(c) + '.0').join(', ')});
+uniform float uVid, uVidCell, uVidPix, uVidFlow, uVidReact; uniform int uVidCol;
+// ---- своё видео: кадр расщепляется на пиксели и ASCII-символы, силуэты держатся контурами ----
+// Зоны идут по медленному полю шума и толкаются киком: оригинал → крупные пиксели → ASCII → символы разлетаются.
+// В ASCII контуры рисуются символами по направлению края (| / - \), тон — плотностью символа, цвет — из кадра.
+float vn2(vec2 x){ vec2 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h2(i, 61u), h2(i + vec2(1.0, 0.0), 61u), f.x), mix(h2(i + vec2(0.0, 1.0), 61u), h2(i + 1.0, 61u), f.x), f.y); }
+float glyphAt(float gi, vec2 inC){ return texture(uGlyphs, vec2((gi + clamp(inC.x, 0.05, 0.95)) / NG, 1.0 - inC.y)).r; }
+vec3 vidInk(vec3 c, float l){
+  if (uVidCol == 1) return mix(mix(uBlue, uRed, smoothstep(0.2, 0.6, l)), uGold, smoothstep(0.55, 0.95, l)) * (0.35 + 0.95 * l);
+  if (uVidCol == 2) return vec3(0.25 + 1.0 * l);
+  return c * 1.3 + 0.06;
+}
+vec3 vidSplit(vec2 frag, vec2 sp, vec3 orig, float u1){
+  vec2 cs = vec2(0.6, 1.0) * uVidCell * u1, cell = floor(frag / cs);
+  // зона решается на клетку ASCII целиком, чтобы клетка не резалась пополам
+  vec2 uvn = (cell + 0.5) * cs / uRes.y; float t = uTime * uVidFlow;
+  float f = 0.65 * vn2(uvn * 2.2 + vec2(t * 0.11, -t * 0.07)) + 0.35 * vn2(uvn * 5.0 - vec2(t * 0.2, t * 0.05));
+  float d = (f - 0.5) * 1.15 + uVid * 1.3 - 0.35 + 0.35 * min(uKick, 1.0) * uKickAmt * uVidReact + 0.12 * uHigh * uVidReact;
+  if (d < 0.2) return orig;
+  vec2 off = sp - frag;                                         // глитч и сдвиги из прохода сохраняются
+  if (d < 0.45) {                                                // пиксели: крупнее у границы с оригиналом
+    float P = uVidPix * u1 * (d < 0.32 ? 1.0 : 0.55);
+    return tap((floor(frag / P) + 0.5) * P + off);
+  }
+  bool scatter = d > 0.8;
+  vec2 inC = (frag - cell * cs) / cs, src = cell;
+  float fade = 1.0;
+  if (scatter) {                                                 // символы отрываются и уплывают вверх, редея
+    float h = h2(cell, 71u), lift = floor(fract(t * 0.35 + h) * 6.0);
+    src = cell - vec2(0.0, lift);
+    fade = (1.0 - lift / 6.0) * step(h2(cell + floor(uTime * 5.0), 73u), 1.35 - d);
+  }
+  vec2 cc = (src + 0.5) * cs + off;
+  vec3 c3 = tap(cc); float L = lum(c3);
+  float gx = lum(tap(cc + vec2(cs.x, 0.0))) - lum(tap(cc - vec2(cs.x, 0.0)));
+  float gy = lum(tap(cc + vec2(0.0, cs.y))) - lum(tap(cc - vec2(0.0, cs.y)));
+  float gi;
+  if (length(vec2(gx, gy)) > 0.16) {
+    int q = int(mod(atan(gy, gx) + 0.3927, 3.14159265) / 0.7854);
+    gi = q == 0 ? G_BAR : q == 1 ? G_BSL : q == 2 ? G_DASH : G_SL;
+  } else gi = DENS[int(clamp(L * 1.08, 0.0, 0.999) * 10.0)];
+  vec3 bg = c3 * 0.07;
+  return mix(bg, vidInk(c3, L), glyphAt(gi, inC) * fade);
+}
 void main(){
   vec2 frag = gl_FragCoord.xy;
   float H = uRes.y, u1 = H / 1080.0;
@@ -1511,6 +1577,7 @@ void main(){
   vec2 dir = (frag - 0.5 * uRes) / H;
   float ca = (uCA * (1.0 + 0.8 * min(uKick, 1.0) * uKickAmt) + 0.008 * g) * H;
   vec3 col = vec3(tap(sp + dir * ca).r, tap(sp).g, tap(sp - dir * ca).b);
+  if (uVid > 0.001) col = vidSplit(frag, sp, col, u1);           // своё видео: расщепление на пиксели и ASCII
   // размазывание (как сортировка пикселей): на аккордах в отдельных полосах яркое тянется шлейфом вправо
   if (uSmear > 0.01) {
     float row = floor(frag.y / (14.0 * u1));
@@ -1887,7 +1954,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uVidCol: 'i', uVidRes: '2', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1902,7 +1969,7 @@ class Renderer {
     this.vao = gl.createVertexArray();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
-    this.logoTex = this.makeTex(); this.waveTex = this.makeTex(); this.glyphTex = this.makeTex(); this.spriteTex = this.makeTex();
+    this.logoTex = this.makeTex(); this.waveTex = this.makeTex(); this.glyphTex = this.makeTex(); this.spriteTex = this.makeTex(); this.videoTex = this.makeTex();
     // текстура шума для органических сцен: детерминированная, повторяется по краям
     this.noiseTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.noiseTex);
     { const r = rng(20240917), d = new Uint8Array(256 * 256 * 4); for (let i = 0; i < d.length; i++) d[i] = Math.floor(r() * 256);
@@ -1969,6 +2036,11 @@ class Renderer {
     gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
+  uploadVideo(el) {
+    const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, this.videoTex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, el);
+  }
   uploadWave(data) {
     const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, this.waveTex);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -1985,6 +2057,7 @@ class Renderer {
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.glyphTex); gl.uniform1i(u.uGlyphs, 4);
     gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, this.spriteTex); gl.uniform1i(u.uSprites, 6);
     gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noiseTex); gl.uniform1i(u.uNoise, 7);
+    gl.activeTexture(gl.TEXTURE8); gl.bindTexture(gl.TEXTURE_2D, this.videoTex); gl.uniform1i(u.uVideo, 8);
     if (src) { gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, src); gl.uniform1i(u.uSrc, 5); }
     gl.uniform2f(u.uRes, this.W, this.H);
     for (const [name, v] of Object.entries(s.U)) {
@@ -2135,7 +2208,7 @@ function frameState(t) {
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
     uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uLook: [0, 0, 0, 0], uLayoutSeed: 1, uTrack: 0, uRoll: 0, uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
-  if (!m) return st;
+  if (!m) { if (state.vid && p.vidOn) Object.assign(U, { uSceneA: 11, uSceneB: 11, uVidRes: [state.vid.w, state.vid.h], uVid: Math.max(0.001, p.vidDis), uVidCell: p.vidCell, uVidPix: p.vidPix, uVidCol: { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0, uVidFlow: p.vidFlow, uVidReact: p.vidReact, uBgA: [0, 0, 0], uBgB: [0, 0, 0] }); return st; }
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
   // стили перетекают: на границе отрезка (каждые styleMin–styleMax с) — к случайной другой сцене
   const segs = styleSegments(m);
@@ -2217,6 +2290,12 @@ function frameState(t) {
   recentEvents(m.kicks, ts, 2.5, 6).forEach((i, k) => { U.uKicks.set([ts - m.kicks.t[i], m.kicks.s[i], hash01(i, 5), 0], k * 4); U.uKickN = k + 1; });
   U.uPad = sample(m.pad, ts); U.uFlowT = (ts < 0 ? ts : sample(m.flowT, ts)) % 2000;
   // священная геометрия: форма сцены A (и B); если обе — геометрия, рисуем одну фигуру-метаморфозу
+  // своё видео: вместо сцен — кадр видео, тёмный фон, без переходов между сценами
+  if (state.vid && p.vidOn) {
+    U.uSceneA = U.uSceneB = 11; U.uMix = 0; U.uTone = 0; U.uBgA = U.uBgB = [0, 0, 0];
+    U.uVidRes = [state.vid.w, state.vid.h]; U.uVid = Math.max(0.001, p.vidDis); U.uVidCell = p.vidCell; U.uVidPix = p.vidPix;
+    U.uVidCol = { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0; U.uVidFlow = p.vidFlow; U.uVidReact = p.vidReact;
+  } else U.uVid = 0;
   U.uGeoBoth = 0;
   if (GEO_IDS.has(U.uSceneA) || GEO_IDS.has(U.uSceneB)) {
     const gctx = (sd) => ({ pad: U.uPad, lowSlow: sample(m.lowSlow, ts), flowA: U.uFlowT * p.flow, sd });
@@ -2253,8 +2332,21 @@ function prepareLogo(st, W, H) {
   st.U.uHasLogo = 1; st.U.uLogoRect = [Math.round(W - p.logoRight * H - lw), Math.round(H - p.logoBottom * H - lh), lw, lh];
 }
 
+// ---------- своё видео: время видео по времени трека, точная перемотка для экспорта и снимков ----------
+function vidTime(t) {
+  const v = state.vid; if (!v || !v.dur) return 0;
+  const x = (t - state.p.vidOffset) * state.p.vidSpeed; return ((x % v.dur) + v.dur) % v.dur;
+}
+function vidSeek(t) {
+  const v = state.vid; if (!v) return Promise.resolve();
+  const x = vidTime(t), el = v.el;
+  if (!el.paused) el.pause();
+  if (Math.abs(el.currentTime - x) < 0.5 / 120 && el.readyState >= 2) return Promise.resolve();
+  return new Promise(res => { const done = () => { clearTimeout(to); res(); }; const to = setTimeout(done, 4000); el.addEventListener('seeked', done, { once: true }); el.currentTime = x; });
+}
 function seek(t) {
   const { W, H } = outSize();
+  if (state.vid && state.p.vidOn && state.vid.el.readyState >= 2) R.uploadVideo(state.vid.el);
   R.setSize(W, H);
   const st = frameState(t);
   R.uploadWave(st.wave || new Uint8Array(WAVE_COLS * 4));
@@ -2273,6 +2365,7 @@ async function saveStill(mp) {
   if (clock.playing) play(false);                              // снимок — всегда с паузы
   const t = currentT(), btn = $('bStill'); btn.disabled = true; btn.textContent = 'Рисую…';
   try {
+    await vidSeek(t);
     state.still = { W, H }; seek(t);
     const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
     if (!blob) throw new Error('браузер не смог собрать PNG такого размера');
@@ -2338,6 +2431,7 @@ window.VZ = {
         const frameBytes = W * H * 3 / 2;
         for (let i = 0; i < o.count; i++) {
           if (o.shouldStop?.()) throw new Error('Отменено');
+          if (state.vid && p.vidOn) await vidSeek((o.start + i) / fps);
           seek((o.start + i) / fps);
           const buf = new Uint8Array(frameBytes); R.readI420(buf); push(buf);
           if (partBytes >= batchBytes) await send();
@@ -2360,6 +2454,7 @@ window.VZ = {
         for (let i = 0; i < o.count; i++) {
           if (err) throw err;
           if (o.shouldStop?.()) { enc.close(); throw new Error('Отменено'); }
+          if (state.vid && p.vidOn) await vidSeek((o.start + i) / fps);
           seek((o.start + i) / fps);
           R.readI420(yuv);
           const vf = new VideoFrame(yuv, { format: 'I420', codedWidth: W, codedHeight: H, timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps),
@@ -2412,12 +2507,19 @@ function play(on) {
   if (on) {
     clock.t0 = clock.t; clock.wall0 = performance.now(); clock.audioOk = false;
     if (state.audioFile) { audio.currentTime = clock.t; audio.play().then(() => { clock.t0 = currentT(); clock.wall0 = performance.now(); clock.lastAT = -1; clock.audioOk = clock.playing; }).catch(() => { }); }
+    if (state.vid) { const el = state.vid.el; el.currentTime = vidTime(clock.t); el.playbackRate = Math.max(0.0625, state.p.vidSpeed); el.play().catch(() => { }); }
     loop();
-  } else { if (state.audioFile) audio.pause(); redraw(); }
+  } else { if (state.audioFile) audio.pause(); if (state.vid) vidSeek(clock.t).then(redraw); redraw(); }
 }
 let fpsCount = 0, fpsT = performance.now();
 function redraw() {
   const t = currentT(), T = durationOf();
+  // видео: на ходу — подтягиваем, если уехало; на паузе — перематываем точно и перерисовываем
+  if (state.vid && state.p.vidOn) {
+    const el = state.vid.el, want = vidTime(t), dt = Math.abs(el.currentTime - want);
+    if (clock.playing) { if (dt > 0.3 && dt < state.vid.dur - 0.3) el.currentTime = want; }
+    else if (dt > 0.5 / 120 && !state.vid.seeking) { state.vid.seeking = true; vidSeek(t).then(() => { state.vid && (state.vid.seeking = false); redraw(); }); }
+  }
   const st = seek(t);
   $('seekbar').max = T; $('seekbar').value = t;
   $('time').innerHTML = `<b>${fmt(t)}</b> / ${fmt(T)}`;
@@ -2478,7 +2580,7 @@ function drawTimelineTop(t) {
 function buildControls() {
   const root = $('controls');
   for (const sec of SCHEMA) {
-    const d = document.createElement('details'); d.open = sec.open; if (sec.th) d.dataset.th = sec.th;
+    const d = document.createElement('details'); d.open = sec.open; if (sec.th) d.dataset.th = sec.th; if (sec.vidOnly) d.dataset.vid = '1';
     d.innerHTML = `<summary>${sec.title}</summary>`;
     for (const it of sec.items) {
       const k = it.k || 1; let el;
@@ -2524,6 +2626,7 @@ function buildControls() {
 function syncControls() {
   for (const f of Object.values(controls)) f();
   document.querySelectorAll('#controls [data-th]').forEach(el => { el.style.display = el.dataset.th === state.p.theme ? '' : 'none'; });
+  document.querySelectorAll('#controls [data-vid]').forEach(el => { el.style.display = state.vid ? '' : 'none'; });
   document.querySelectorAll('#themeSw button').forEach(b => b.classList.toggle('on', b.dataset.t === state.p.theme));
 }
 // переключатель темы: параметры темы — к её значениям, остальное (лого, рендер, реакция) как было
@@ -2568,6 +2671,23 @@ async function setFile(kind, file) {
     state.audioFile = file; state.audioName = file.name; state.duration = null; studio.upload = null;
     drop.classList.add('has'); drop.querySelector('small').textContent = file.name;
     await analyzeFile(file);
+    return;
+  }
+  if (kind === 'video') {
+    if (state.vid) { state.vid.el.pause(); URL.revokeObjectURL(state.vid.url); state.vid = null; }
+    if (!file) { drop.classList.remove('has'); drop.querySelector('small').textContent = 'MP4 / MOV / WebM'; syncControls(); redraw(); return; }
+    const url = URL.createObjectURL(file), el = document.createElement('video');
+    el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto'; el.src = url;
+    await new Promise((ok, fail) => { el.onloadeddata = ok; el.onerror = () => fail(new Error('браузер не открыл это видео (попробуй MP4 H.264)')); });
+    state.vid = { el, url, name: file.name, w: el.videoWidth, h: el.videoHeight, dur: el.duration, seeking: false };
+    drop.classList.add('has'); drop.querySelector('small').textContent = `${file.name} · ${el.videoWidth}×${el.videoHeight}`;
+    state.p.vidOn = true; syncControls();
+    // трека нет — берём звук из самого видео (анализ и рендер)
+    if (!state.audioFile) {
+      await setFile('audio', file).catch(() => { });
+      if (!state.m) { await setFile('audio', null); $('anStatus').className = 'note warn'; $('anStatus').textContent = 'В видео нет звука (или браузер его не прочитал) — перетащи трек в «Трек».'; }
+    }
+    await vidSeek(clock.t); redraw();
     return;
   }
   // логотип
