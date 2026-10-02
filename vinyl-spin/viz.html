@@ -143,7 +143,7 @@ const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
   scenes: 'auto', seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
-  blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 1.2, fx: 1,
+  blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
   kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1,
   syncMs: 0, bpmFix: 0, gridShiftMs: 0,
@@ -593,7 +593,7 @@ void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position
 const FS_MAIN = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes;
-uniform int uSceneA, uSceneB; uniform float uMix; uniform vec4 uSeedA, uSeedB;
+uniform int uSceneA, uSceneB, uTrans; uniform float uMix; uniform vec4 uSeedA, uSeedB; uniform vec3 uSpin;
 uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uStab, uTension, uFlash, uDropAge, uBeat, uBar, uTime, uBlk, uTone;
 uniform float uKickAmt, uStabAmt, uHatAmt;
 uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed, -
@@ -873,6 +873,30 @@ vec3 sceneField(vec2 p, vec4 sd){
   return col;
 }
 
+// опорные элементы сцен: (x, y, размер); порядок — левый, центр, правый
+const vec3 ANC[12] = vec3[12](
+  vec3(-0.53, 0.0, 0.10), vec3(0.0, 0.0, 0.27), vec3(0.53, 0.0, 0.13),
+  vec3(-0.458, 0.0, 0.12), vec3(0.028, 0.0, 0.29), vec3(0.562, 0.0, 0.08),
+  vec3(-0.258, 0.0, 0.10), vec3(0.0, 0.0, 0.30), vec3(0.45, 0.0, 0.12),
+  vec3(-0.43, 0.0, 0.12), vec3(0.067, 0.0, 0.20), vec3(0.518, 0.0, 0.10));
+const vec3 BGS[4] = vec3[4](vec3(0.065, 0.066, 0.054), vec3(0.885, 0.876, 0.862), vec3(0.07, 0.064, 0.036), vec3(0.925, 0.925, 0.918));
+mat2 rot2(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+float vnoise(vec2 x){ vec2 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hc(i, 91u), hc(i + vec2(1.0, 0.0), 91u), f.x), mix(hc(i + vec2(0.0, 1.0), 91u), hc(i + 1.0, 91u), f.x), f.y); }
+float fbm(vec2 x){ return 0.62 * vnoise(x) + 0.38 * vnoise(x * 2.07 + 13.1); }
+vec2 life(int i){ float f = float(i); return vec2(0.02 * sin(uTime * (0.17 + 0.05 * f) + f * 2.1), 0.014 * sin(uTime * (0.13 + 0.04 * f) + f * 1.3 + 1.0)); }
+float breath(int i){ float f = float(i); return 1.0 + 0.05 * sin(uTime * (0.21 + 0.06 * f) + f) + 0.03 * min(uKick, 1.0) * uKickAmt * step(f, 0.5); }
+// откуда брать картинку сцены id, чтобы её элемент i оказался в точке M[i] с размером sM[i] и поворотом ang[i];
+// веса — гауссовы окна вокруг элементов, вдали от них кадр почти не двигается
+vec2 featWarp(vec2 q, int id, vec2 M[3], float sM[3], vec3 ang){
+  vec2 acc = 0.06 * q; float ws = 0.06;
+  for (int i = 0; i < 3; i++) {
+    vec3 X = ANC[id * 3 + i]; float sg = 1.25 * sM[i] + 0.05; vec2 d = q - M[i];
+    float w = exp(-dot(d, d) / (2.0 * sg * sg));
+    acc += w * (X.xy + rot2(-ang[i]) * d * (X.z / sM[i])); ws += w;
+  }
+  return acc / ws;
+}
 vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : sceneField(p, sd); }
 // мелкие детали поверх любой сцены: полоска-спектр, развёртка по такту, спутники, метки по углам
 vec3 details(vec3 c, vec2 p){
@@ -905,18 +929,41 @@ void main(){
   float zoom = 1.0 + 0.025 * uLowSlow + 0.018 * min(uKick, 1.0) * uKickAmt + 0.012 * sin(uTime * 0.11);
   float rot = 0.012 * sin(uTime * 0.07) + 0.004 * uSpring * uKickAmt;
   vec2 p = mat2(cos(rot), sin(rot), -sin(rot), cos(rot)) * p0 / zoom + vec2(0.006 * sin(uTime * 0.13), 0.004 * cos(uTime * 0.09));
-  vec3 c = scene(uSceneA, p, uSeedA);
-  if (uMix > 0.0) {
-    // стили перетекают: блоки растворяются вслед за бегущей волной, на кромке — цветной глитч
-    vec3 b = scene(uSceneB, p, uSeedB);
-    vec2 bc = floor(p0 / vec2(0.045, 0.03));
-    float mask = 0.3 * hc(bc, 77u) + 0.7 * (p0.x / 1.8 + 0.5 + 0.12 * sin(p0.y * 9.0 + uTime));
-    float th = uMix * 1.3 - 0.15;
-    float w = 1.0 - smoothstep(th - 0.04, th + 0.04, mask);
-    c = mix(c, b, w);
-    float edge = 1.0 - smoothstep(0.0, 0.05, abs(mask - th));
-    c = mix(c, hc(bc, 79u) < 0.5 ? uBlue : uRed, edge * 0.55 * step(0.35, hc(bc, 81u)));
+  vec3 c;
+  // морфинг: у каждой сцены три опорных элемента (левый прибор, центр, правый). Элементы обеих сцен
+  // сводятся в общие точки M (позиция и размер плавно идут от сцены A к B), поворачиваются и перетекают.
+  // Между переходами точки чуть блуждают и дышат — сцена живёт.
+  float e = uMix;
+  vec2 M[3]; float sM[3];
+  for (int i = 0; i < 3; i++) {
+    vec3 a = ANC[uSceneA * 3 + i], b = ANC[uSceneB * 3 + i];
+    M[i] = mix(a.xy, b.xy, e) + life(i); sM[i] = mix(a.z, b.z, e) * breath(i);
   }
+  vec2 pa = featWarp(p, uSceneA, M, sM, uSpin * e);
+  vec2 pb = featWarp(p, uSceneB, M, sM, -uSpin * (1.0 - e));
+  if (uMix > 0.0) {
+    float bump = sin(PI * e);
+    if (uTrans == 1) {
+      // пролёт сквозь центр: старая сцена надвигается на зрителя, новая выплывает из глубины
+      pa = pa / (1.0 + 5.0 * e * e);
+      pb = pb * (1.0 + 3.0 * (1.0 - e) * (1.0 - e));
+    } else if (uTrans == 2) {
+      // жидкость: обе сцены текут по медленному полю и закручиваются вокруг центра
+      vec2 fl = vec2(fbm(p * 3.0 + vec2(uTime * 0.2, 0.0)), fbm(p * 3.0 + vec2(7.3, -uTime * 0.2))) - 0.5;
+      float sw = 1.6 * bump * exp(-2.5 * dot(p, p));
+      pa = rot2(sw) * pa + fl * 0.12 * bump; pb = rot2(-sw * 0.6) * pb + fl * 0.12 * bump;
+    }
+    vec3 ca = scene(uSceneA, pa, uSeedA), cb = scene(uSceneB, pb, uSeedB);
+    // новая сцена проступает растеканием: по мягкому шуму, яркие элементы новой — раньше остальных
+    float n = 0.75 * fbm(p * 2.2 + vec2(uTime * 0.12, -uTime * 0.07)) + 0.25 * vnoise(p * 9.0 - uTime * 0.3);
+    if (uTrans == 1) n = 0.7 * clamp(length(p) / 0.9, 0.0, 1.0) + 0.3 * n;
+    n = clamp((n - 0.5) * 2.2 + 0.5 - 0.3 * clamp(length(cb - BGS[uSceneB]) * 1.4, 0.0, 1.0) + 0.1, 0.0, 1.0);
+    float fr = e * 1.2 - 0.1, m = smoothstep(n - 0.045, n + 0.045, fr);
+    c = mix(ca, cb, m);
+    // по кромке растекания — тонкий светящийся край цвета схемы
+    float edge = (1.0 - smoothstep(0.0, 0.022, abs(fr - n))) * bump;
+    c = mix(c, mix(uBlue, vec3(1.0), 0.45), edge * 0.55);
+  } else c = scene(uSceneA, pa, uSeedA);
   c = details(c, p);
   // дроп: из центра расходится тонкая ударная волна
   if (uFlash > 0.0) {
@@ -946,7 +993,7 @@ vec3 tap(vec2 f){ return texture(uScene, f / uRes).rgb; }
 // Зеркало и волна сдвигают, откуда берётся картинка; ASCII и растр берут цвет через тот же сдвиг
 vec2 warp(vec2 f){
   float u1 = uRes.y / 1080.0; vec2 g = f;
-  if (uFx.x > 0.5) g.x = 0.5 * uRes.x - abs(g.x - 0.5 * uRes.x);
+  g.x = mix(g.x, 0.5 * uRes.x - abs(g.x - 0.5 * uRes.x), uFx.x);   // зеркало складывается плавно
   if (uFx.w > 0.01) {
     float strip = floor(f.y / (24.0 * u1));
     g.x += uFx.w * u1 * (sin(f.y / (38.0 * u1) + uTime * 3.1) * (6.0 + 34.0 * uLow) + (h2(vec2(strip, floor(uTime * 6.25)), 51u) - 0.5) * 24.0 * uLow);
@@ -1012,9 +1059,8 @@ void main(){
   vec2 cn = (cell + 0.5 - 0.5 * grid) * cs / H;
   float rr = length(cn), rph = rr * 22.0 - t * 4.0 - 3.0 * min(uKick, 1.0);
   float fC = step(thr * 0.9 + 0.1, 0.5 + 0.5 * cos(rph)) * step(rr, 0.75);
-  float trans = 4.0 * uMix * (1.0 - uMix);
   float cellOn = max(max(fB * uAMode.x, fW * uAMode.y), max(fR * uAMode.z, fC * uAMode.w));
-  cellOn = max(step(0.5, cellOn), step(h2(cell, uAsciiSeed + 11u), trans * 0.55 * min(1.0, uAscii * 4.0)));
+  cellOn = step(0.5, cellOn);
   if (cellOn > 0.5) {
     vec2 cc = (cell + 0.5) * cs, inC = (frag - cell * cs) / cs;
     vec3 cc3 = tap(warp(cc));
@@ -1078,7 +1124,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1245,7 +1291,9 @@ function styleSegments(m) {
     if (k > 0 && p.scenes === 'auto') scene = (scene + 1 + Math.floor(r(5) * 3)) % 4;   // любая другая из трёх
     let nm = Math.floor(r(6) * ASCII_MODES.length); if (nm === mode) nm = (nm + 1) % ASCII_MODES.length; mode = nm;
     const isDrop = drops.some(d => Math.abs(d - tt) < 1e-6);
-    t.push(tt); s.push({ scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], fx: FX_MODES[Math.floor(r(8) * FX_MODES.length)], trans: isDrop ? 'drop' : 'shift' });
+    t.push(tt); s.push({ scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], fx: FX_MODES[Math.floor(r(8) * FX_MODES.length)], trans: isDrop ? 'drop' : 'shift',
+      // тип перехода в этот отрезок: 0 — морфинг элементов, 1 — пролёт сквозь центр (и всегда на дропе), 2 — жидкость
+      kind: isDrop ? 1 : [0, 0, 0, 1, 2, 2][Math.floor(r(9) * 6)], spin: [0, 1, 2].map(q => (r(10 + q) - 0.5) * 1.6) });
     let next = Math.max(snap(tt + lo + r(7) * (hi - lo)), tt + 0.5 * lo);
     const d = drops.find(d => d > tt + 0.25 && d < next + 0.25 * lo);   // дроп рядом — меняемся ровно на нём
     tt = d ?? next;
@@ -1265,20 +1313,21 @@ function frameState(t) {
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
     uKicks: new Float32Array(24), uStabs: new Float32Array(48), uHats: new Float32Array(16), uKickN: 0, uStabN: 0, uHatN: 0,
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
-    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
+    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
   if (!m) return st;
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
   // стили перетекают: на границе отрезка (каждые styleMin–styleMax с) — к случайной другой сцене
   const segs = styleSegments(m);
   let j = Math.max(0, upper(segs.t, ts) - 1);
-  const D = (k) => Math.min(segs.s[k].trans === 'drop' ? Math.min(p.morphSec, 0.5) : p.morphSec, (segs.t[k] - (segs.t[k - 1] ?? -1e9)) / 2, ((segs.t[k + 1] ?? 1e9) - segs.t[k]) / 2);
+  const D = (k) => Math.min(segs.s[k].trans === 'drop' ? Math.min(p.morphSec, 0.8) : p.morphSec, (segs.t[k] - (segs.t[k - 1] ?? -1e9)) / 2, ((segs.t[k + 1] ?? 1e9) - segs.t[k]) / 2);
   let from = j, to = j, u = 0;
   if (j > 0 && ts < segs.t[j] + D(j) / 2) { from = j - 1; to = j; u = (ts - (segs.t[j] - D(j) / 2)) / D(j); }
   else if (j + 1 < segs.t.length && ts > segs.t[j + 1] - D(j + 1) / 2) { from = j; to = j + 1; u = (ts - (segs.t[j + 1] - D(j + 1) / 2)) / D(j + 1); }
   u = Math.min(1, Math.max(0, u)); u = u * u * (3 - 2 * u);
   U.uSceneA = segs.s[from].scene; U.uSeedA = segs.s[from].seed; U.uSceneB = segs.s[to].scene; U.uSeedB = segs.s[to].seed;
   U.uMix = from === to ? 0 : u;
+  U.uTrans = segs.s[to].kind; U.uSpin = segs.s[to].spin;
   U.uFx = segs.s[from].fx.map((a, i) => (a * (1 - U.uMix) + segs.s[to].fx[i] * U.uMix) * p.fx);
   U.uAMode = segs.s[from].mode.map((a, i) => a * (1 - U.uMix) + segs.s[to].mode[i] * U.uMix);
   const tone = (k) => k % 2 === 1 ? 1 : 0;
@@ -1295,7 +1344,7 @@ function frameState(t) {
   let gl = 0, gs = 0;
   for (const i of recentEvents(m.stabs, ts, 0.6, 8)) if (m.stabEcho[i] === 0 && m.stabs.s[i] > 0.6) { const e = m.stabs.s[i] * Math.exp(-(ts - m.stabs.t[i]) / 0.12); if (e > gl) { gl = e; gs = i; } }
   const dg = sec.trans === 'drop' && ts >= sec.t ? Math.exp(-(ts - sec.t) / 0.3) : 0;
-  gl = Math.max(gl * 0.8, dg, U.uMix * (1 - U.uMix) * 1.6);
+  gl = Math.max(gl * 0.8, dg);
   U.uGlitch = Math.min(1.2, gl * p.glitch);
   U.uGlitchSeed = ((gs + 1) * 2246822519 + Math.floor(ts * 12.5) * 3266489917) >>> 0;
   U.uCA = 0.0015 * p.ca;
