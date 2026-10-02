@@ -145,6 +145,7 @@ const VDEF = Object.freeze({
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
+  digital: 0.8, freeze: 1, games: 'normal', gameKinds: 'both', gameCol: 'mono', gamePx: 5,
   looks: 'auto', vhs: 0.7, riso: 1, xerox: 1, brutal: 0.8, misreg: 1, risoInks: 'fluo', risoScreen: 'grain',
   kickAmt: 1, hatAmt: 1, stabAmt: 1, flashAmt: 1,
   syncMs: 0, bpmFix: 0, gridShiftMs: 0,
@@ -174,6 +175,14 @@ const SCHEMA = [
     { key: 'styleMin', label: 'Смена стиля: не чаще, чем раз в, с', min: 1, max: 30, step: 0.5 },
     { key: 'styleMax', label: 'Смена стиля: не реже, чем раз в, с', min: 1, max: 60, step: 0.5 },
     { key: 'morphSec', label: 'Перетекание стилей, с', min: 0.1, max: 6, step: 0.1 },
+  ]},
+  { title: 'Цифровые глитчи 90-х и аркада', open: true, items: [
+    { key: 'digital', label: 'Битые MPEG-блоки, датамош, артефакты сжатия', min: 0, max: 1.5, step: 0.01 },
+    { key: 'freeze', label: 'Застревающие и заикающиеся кадры', min: 0, max: 2, step: 0.01 },
+    { key: 'games', label: 'Аркадные эпизоды', type: 'select', options: [['normal', 'иногда'], ['often', 'часто'], ['rare', 'редко'], ['off', 'выключить']] },
+    { key: 'gameKinds', label: 'Какие игры', type: 'select', options: [['both', 'Space Invaders и Pac-Man'], ['invaders', 'только Space Invaders'], ['pacman', 'только Pac-Man']] },
+    { key: 'gameCol', label: 'Цвет игр', type: 'select', options: [['mono', 'один цвет, контрастно к фону'], ['arcade', 'аркадные цвета'], ['palette', 'из цветовой схемы']] },
+    { key: 'gamePx', label: 'Пиксель игр, px при 1080p', min: 2, max: 12, step: 0.5 },
   ]},
   { title: 'Аналог: VHS, ризограф, ксерокс, брутализм', open: true, items: [
     { key: 'looks', label: 'Как включаются', type: 'select', options: [['auto', 'свой «аналог» у каждого отрезка стиля (сила — ползунки ниже)'], ['manual', 'всё время вместе, сила — ползунки ниже'], ['off', 'выключить']] },
@@ -542,6 +551,8 @@ function mapFromJSON(j) { return { ...j, env: Object.fromEntries(Object.entries(
 // Подготовленная карта: сетка с ручными правками, времена событий в Float64Array, медленные огибающие, путь камеры
 function prepareMap(raw, p) {
   const m = { raw, duration: raw.duration };
+  // зерно трека: у разных треков разная случайность (сцены, схемы, глитчи, игры), у одного и того же — всегда одна
+  m.trackSeed = (Math.imul(Math.round(raw.duration * 1000), 2654435761) ^ Math.imul(raw.kicks.length + 1, 40503) ^ Math.round((raw.beatLen || 0.5) * 1e6)) >>> 0 & 0x7fffffff;
   m.beatLen = p.bpmFix > 0 ? 60 / p.bpmFix : raw.beatLen;
   m.beat0 = raw.beat0 + p.gridShiftMs / 1000;
   m.grid = raw.gridConf > 0 || p.bpmFix > 0;
@@ -594,6 +605,160 @@ function springSum(ev, t, freq, zeta, win) {
   return s;
 }
 function hash01(a, b = 0) { let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35); h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15; return (h >>> 0) / 4294967296; }
+
+/* ==========================================================================
+   Аркадные эпизоды: Space Invaders и Pac-Man. Каждый кадр — заново просчитанная маленькая симуляция
+   от начала эпизода (без состояния между кадрами), случайность — от зерна трека: у каждого трека своё.
+   Мир — в «пикселях спрайта»: высота кадра 1080 / размер пикселя.
+   ========================================================================== */
+const SPRITES = {
+  // 0–1 кальмар, 2–3 краб, 4–5 осьминог, 6 корабль, 7 взрыв пришельца, 8 НЛО, 9 взрыв корабля, 10 бомба, 20 пуля
+  0: ['...##...', '..####..', '.######.', '##.##.##', '########', '..#..#..', '.#.##.#.', '#.#..#.#'],
+  1: ['...##...', '..####..', '.######.', '##.##.##', '########', '.#.##.#.', '#......#', '.#....#.'],
+  2: ['..#.....#..', '...#...#...', '..#######..', '.##.###.##.', '###########', '#.#######.#', '#.#.....#.#', '...##.##...'],
+  3: ['..#.....#..', '#..#...#..#', '#.#######.#', '###.###.###', '###########', '.#########.', '..#.....#..', '.#.......#.'],
+  4: ['....####....', '.##########.', '############', '###..##..###', '############', '...##..##...', '..##.##.##..', '##........##'],
+  5: ['....####....', '.##########.', '############', '###..##..###', '############', '..###..###..', '.##..##..##.', '..##....##..'],
+  6: ['......#......', '.....###.....', '.....###.....', '.###########.', '#############', '#############', '#############', '#############'],
+  7: ['....#...#....', '.#..#...#..#.', '..#.......#..', '...#.....#...', '##.........##', '...#.....#...', '..#..#.#..#..', '.#...#.#...#.'],
+  8: ['.....######.....', '...##########...', '..############..', '.##.##.##.##.##.', '################', '..###..##..###..', '...#........#...'],
+  9: ['....#.....#.....', '..#...#.#...#...', '....##.#.##.#...', '.#..########..#.', '...##########...', '..############..', '.##############.', '################'],
+  10: ['.#.', '#..', '.#.', '..#', '.#.', '#..', '.#.'],
+  20: ['#', '#', '#', '#'],
+  // 14–15 призрак (две юбки), 16–17 испуганный, 18 глаза: # тело, o белок, x зрачок
+  14: ['.....####.....', '...########...', '..##########..', '.#oooo##oooo#.', '.#ooxx##ooxx#.', '##ooxx##ooxx##', '###oo####oo###', '##############', '##############', '##############', '##############', '##############', '##.###..###.##', '#...##..##...#'],
+  15: ['.....####.....', '...########...', '..##########..', '.#oooo##oooo#.', '.#ooxx##ooxx#.', '##ooxx##ooxx##', '###oo####oo###', '##############', '##############', '##############', '##############', '##############', '####.####.####', '.##...##...##.'],
+  16: ['.....####.....', '...########...', '..##########..', '.############.', '.###oo##oo###.', '####oo##oo####', '##############', '##############', '##############', '##o##o##o##o##', '#o#oo#oo#oo#o#', '##############', '##.###..###.##', '#...##..##...#'],
+  17: ['.....####.....', '...########...', '..##########..', '.############.', '.###oo##oo###.', '####oo##oo####', '##############', '##############', '##############', '##o##o##o##o##', '#o#oo#oo#oo#o#', '##############', '####.####.####', '.##...##...##.'],
+  18: ['..............', '..............', '..............', '..oooo..oooo..', '..ooxx..ooxx..', '..ooxx..ooxx..', '...oo....oo...'],
+};
+// атлас 32 ячейки по 16×16: R — тело, G — белок, B — зрачок; Pac-Man (11–13) рисуется дугой
+function spriteAtlas() {
+  const c = document.createElement('canvas'); c.width = 32 * 16; c.height = 16;
+  const x = c.getContext('2d'); const img = x.createImageData(c.width, 16);
+  const put = (id, px, py, r, g, b) => { if (px < 0 || px > 15 || py < 0 || py > 15) return; const i = (py * c.width + id * 16 + px) * 4; img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255; };
+  for (const [id, rows] of Object.entries(SPRITES)) {
+    const h = rows.length, w = rows[0].length, ox = Math.floor((16 - w) / 2), oy = Math.floor((16 - h) / 2);
+    rows.forEach((row, y) => [...row].forEach((ch, xx) => { if (ch === '#') put(+id, ox + xx, oy + y, 255, 0, 0); else if (ch === 'o') put(+id, ox + xx, oy + y, 0, 255, 0); else if (ch === 'x') put(+id, ox + xx, oy + y, 0, 0, 255); }));
+  }
+  [50, 28, 0].forEach((mouth, k) => {     // рот: широко, наполовину, закрыт; смотрит вправо
+    for (let y = 0; y < 16; y++) for (let xx = 0; xx < 16; xx++) {
+      const dx = xx - 7.5, dy = y - 7.5, a = Math.abs(Math.atan2(dy, dx)) * 180 / Math.PI;
+      if (dx * dx + dy * dy <= 6.6 * 6.6 && a >= mouth / 2) put(11 + k, xx, y, 255, 0, 0);
+    }
+  });
+  x.putImageData(img, 0, 0); return c;
+}
+function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+// расписание эпизодов на весь трек
+function gameEpisodes(m, p) {
+  const key = [p.games, p.gameKinds, p.seed, m.trackSeed].join('|');
+  if (m.gameCache && m.gameCache.key === key) return m.gameCache.eps;
+  const eps = [];
+  if (p.games !== 'off') {
+    const r = rng(m.trackSeed * 31 + p.seed * 7 + 5), bar = 4 * m.beatLen;
+    const kinds = p.gameKinds === 'invaders' ? ['inv'] : p.gameKinds === 'pacman' ? ['pac'] : ['inv', 'pac'];
+    const gap = p.games === 'often' ? [6, 18] : [25, 55];
+    let t = 4 + r() * (p.games === 'often' ? 10 : 25);
+    while (t < m.duration - 6) {
+      const kind = kinds[Math.floor(r() * kinds.length)];
+      const t0 = m.grid ? m.beat0 + Math.ceil((t - m.beat0) / bar) * bar : t;
+      const dur = kind === 'inv' ? 9 + r() * 7 : 7 + r() * 5;
+      eps.push({ kind, t0, t1: Math.min(m.duration, t0 + dur), seed: Math.floor(r() * 1e9) });
+      t = t0 + dur + gap[0] + r() * (gap[1] - gap[0]);
+    }
+  }
+  m.gameCache = { key, eps };
+  return eps;
+}
+// состояние игры в момент t → спрайты для шейдера (координаты — в пикселях спрайта, начало — левый верх кадра)
+function gameState(m, p, t, aspect) {
+  const eps = gameEpisodes(m, p), out = { sp: [], inv: null, pac: null, flick: 1 };
+  const e = eps.find(e => t >= e.t0 && t < e.t1); if (!e) return out;
+  const WW = aspect * 1080 / p.gamePx, HH = 1080 / p.gamePx, r = rng(e.seed), age = t - e.t0, left = e.t1 - t;
+  // появление и уход — мерцанием, как у старого монитора
+  out.flick = age < 0.35 ? (Math.floor(age * 25) % 2) : left < 0.35 ? (Math.floor(left * 25) % 2) : 1;
+  const evIn = (ev, a, b) => { const out = []; for (let i = upper(ev.t, a); i < ev.t.length && ev.t[i] < b; i++) out.push(ev.t[i]); return out; };
+  if (e.kind === 'inv') {
+    const cols = 11, rows = 5, CW = 16, CH = 16, alive = Array.from({ length: rows }, () => (1 << cols) - 1);
+    let ox = 8 + r() * Math.max(1, WW - cols * CW - 16), oy = HH * (0.1 + 0.08 * r()), dir = r() < 0.5 ? 1 : -1, anim = 0;
+    let shipX = WW * (0.2 + 0.6 * r()), shipTarget = shipX, nextAim = 0, shipDead = -9, shot = null, bombs = [], booms = [];
+    const shipY = HH * 0.88, kicks = [...evIn(m.kicks, e.t0, t + 1e-9), ...evIn(m.stabs, e.t0, t + 1e-9)].sort((a, b) => a - b), hats = evIn(m.hats, e.t0, t + 1e-9);
+    const ufoT = r() < 0.7 ? e.t0 + 1.5 + r() * (e.t1 - e.t0 - 4) : 1e9, ufoDir = r() < 0.5 ? 1 : -1; let ufoDead = false;
+    const count = () => alive.reduce((s, v) => { let n = 0; for (; v; v &= v - 1) n++; return s + n; }, 0);
+    const dt = 0.02; let ki = 0, hi = 0, stepAcc = 0;
+    for (let s = e.t0; s < t; s += dt) {
+      // строй шагает: чем меньше пришельцев, тем быстрее (как в оригинале), шаг привязан к темпу
+      const n = count(); if (!n) break;
+      stepAcc += dt; const stepDur = m.beatLen * (0.18 + 0.32 * n / 55);
+      if (stepAcc >= stepDur) {
+        stepAcc -= stepDur; anim ^= 1;
+        let minC = cols, maxC = -1; alive.forEach(v => { for (let c = 0; c < cols; c++) if (v >> c & 1) { minC = Math.min(minC, c); maxC = Math.max(maxC, c); } });
+        const nx = ox + dir * 2;
+        if (nx + minC * CW < 4 || nx + maxC * CW + 12 > WW - 4) { dir = -dir; oy += 8; } else ox = nx;
+      }
+      // корабль: выбирает случайную живую колонну и едет под неё
+      if (s >= nextAim) { const live = []; for (let c = 0; c < cols; c++) if (alive.some(v => v >> c & 1)) live.push(c); const c = live[Math.floor(r() * live.length)] ?? 5; shipTarget = ox + c * CW + 6 + (r() - 0.5) * 10; nextAim = s + 0.6 + r() * 1.4; }
+      if (s - shipDead > 1.2) shipX += Math.sign(shipTarget - shipX) * Math.min(Math.abs(shipTarget - shipX), 70 * dt);
+      shipX = Math.max(8, Math.min(WW - 8, shipX));
+      // выстрел — на кик или аккорд, одна пуля на экране
+      while (ki < kicks.length && kicks[ki] <= s) { if (!shot && s - shipDead > 1.2) shot = { x: shipX, y: shipY - 6 }; ki++; }
+      // бомбы пришельцев — на хэтах, не каждый раз
+      while (hi < hats.length && hats[hi] <= s) {
+        if (bombs.length < 3 && r() < 0.35) { const live = []; for (let c = 0; c < cols; c++) for (let q = rows - 1; q >= 0; q--) if (alive[q] >> c & 1) { live.push([c, q]); break; } const b = live[Math.floor(r() * live.length)]; if (b) bombs.push({ x: ox + b[0] * CW + 6, y: oy + b[1] * CH + 8 }); }
+        hi++;
+      }
+      if (shot) {
+        shot.y -= 300 * dt;
+        for (let q = 0; q < rows && shot; q++) for (let c = 0; c < cols && shot; c++) {
+          if (!(alive[q] >> c & 1)) continue;
+          const ax = ox + c * CW, ay = oy + q * CH;
+          if (shot.x >= ax && shot.x <= ax + 12 && shot.y >= ay && shot.y <= ay + 8) { alive[q] &= ~(1 << c); booms.push({ x: ax + 6, y: ay + 4, t: s, id: 7 }); shot = null; }
+        }
+        if (shot && s >= ufoT && !ufoDead) { const ux = ufoDir > 0 ? -16 + (s - ufoT) * 45 : WW + 16 - (s - ufoT) * 45; if (Math.abs(shot.x - ux) < 8 && shot.y < HH * 0.06 + 4 && shot.y > HH * 0.06 - 4) { ufoDead = true; booms.push({ x: ux, y: HH * 0.06, t: s, id: 7 }); shot = null; } }
+        if (shot && shot.y < 0) shot = null;
+      }
+      bombs = bombs.filter(b => { b.y += 85 * dt; if (s - shipDead > 1.2 && Math.abs(b.x - shipX) < 7 && b.y > shipY - 4 && b.y < shipY + 4) { shipDead = s; booms.push({ x: shipX, y: shipY, t: s, id: 9 }); return false; } return b.y < HH; });
+    }
+    out.inv = { ox, oy, anim, alive };
+    if (t - shipDead > 1.2) out.sp.push([shipX, shipY, 6, 1]);
+    if (shot) out.sp.push([shot.x, shot.y, 20, 1]);
+    bombs.forEach(b => out.sp.push([b.x, b.y, 10, 1]));
+    booms.forEach(b => { if (t - b.t < (b.id === 9 ? 0.9 : 0.25)) out.sp.push([b.x, b.y, b.id, 3]); });
+    if (t >= ufoT && !ufoDead) { const ux = ufoDir > 0 ? -16 + (t - ufoT) * 45 : WW + 16 - (t - ufoT) * 45; if (ux > -20 && ux < WW + 20) out.sp.push([ux, HH * 0.06, 8, 3]); }
+  } else {
+    // Pac-Man: коридор с точками, призраки гонятся; энерджайзер — и всё наоборот
+    const dir = r() < 0.5 ? 1 : -1, y = HH * (0.3 + 0.45 * r()), nG = 2 + Math.floor(r() * 3), dur = e.t1 - e.t0;
+    const start = dir > 0 ? -12 : WW + 12, span = WW + 24, pow = r() < 0.75 ? 0.3 + 0.3 * r() : 2;
+    // скорость подобрана так, чтобы история (погоня, разворот, доедание) уложилась в эпизод
+    const v = pow < 1 ? span * (1 + 0.9 * pow) / (dur * 0.92) + 4 : span / (dur * 0.92);
+    const powX = start + dir * span * pow, tp = pow < 1 ? span * pow / v : 1e9;
+    const chomp = (a) => [0, 1, 2, 1][Math.floor(a / m.beatLen * 8) & 3] + 11;
+    // когда съеден последний призрак — Pac-Man снова разворачивается и доедает коридор
+    const catchOf = (g) => (20 + g * 18 + 8 + 0.04 * v * tp) / (v * 1.25 - v * 0.55);
+    const tc = pow < 1 ? catchOf(nG - 1) + 0.3 : 0;
+    let px, pd, frontier;
+    if (age < tp) { px = start + dir * v * age; pd = dir; frontier = px; }
+    else if (age < tp + tc) { px = powX - dir * v * 1.25 * (age - tp); pd = -dir; frontier = powX; }
+    else { const xc = powX - dir * v * 1.25 * tc; px = xc + dir * v * (age - tp - tc); pd = dir; frontier = dir > 0 ? Math.max(powX, px) : Math.min(powX, px); }
+    out.pac = { y, frontier, dir, powX, powOn: age < tp && pow < 1 };
+    for (let g = 0; g < nG; g++) {
+      const gap = 20 + g * 18, col = 5 + g;
+      let gx, gid, gc = col, gm = -dir;
+      if (age < tp) { gx = start - dir * (gap + 8) + dir * v * 1.04 * age; gid = 14 + (Math.floor(age / m.beatLen * 4) & 1); gm = dir; }
+      else {
+        const gx0 = start - dir * (gap + 8) + dir * v * 1.04 * tp, ga = age - tp;
+        const gxF = gx0 - dir * v * 0.55 * ga;                       // испуганный бежит назад, но медленнее
+        const catchT = (gx0 - (powX)) * dir < 0 ? Math.abs(powX - gx0) / (v * 1.25 - v * 0.55) : 0;
+        if (ga < catchT) { gx = gxF; gid = (ga > 3 && (Math.floor(ga * 6) & 1)) ? 17 : 16; gc = 9; gm = -dir; }
+        else { const ce = gx0 - dir * v * 0.55 * catchT; gx = ce + dir * v * 2.6 * (ga - catchT); gid = 18; gc = 1; gm = dir; if (ga - catchT < 0.4) out.sp.push([ce, y - 10, 7, 3]); }
+      }
+      out.sp.push([gx, y, gid + (gm < 0 ? 100 : 0), gc]);
+    }
+    out.sp.push([px, y, chomp(age) + (pd < 0 ? 100 : 0), 4]);
+  }
+  return out;
+}
 
 /* ==========================================================================
    WebGL2: сцены (туннель колец, точечное море), растр, второй цвет, зерно, подписи, логотип
@@ -991,7 +1156,9 @@ const GLYPHS = ' .,:;-~=+*^<>/\\|()[]{}!?xo%#&$@0123456789';
 const FS_PRINT = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes; uniform sampler2D uScene, uGlyphs;
-uniform float uGrain, uTone, uMix, uAscii, uGlitch, uCA, uKick, uKickAmt, uTime; uniform vec3 uBgA, uBgB, uBlue, uRed, uGold; uniform vec4 uAMode, uFx; uniform float uHigh, uLow, uSmear, uInvert; uniform uint uFrame, uSeed, uGlitchSeed, uAsciiSeed;
+uniform float uGrain, uTone, uMix, uAscii, uGlitch, uCA, uKick, uKickAmt, uTime; uniform vec3 uBgA, uBgB, uBlue, uRed, uGold; uniform vec4 uAMode, uFx; uniform float uHigh, uLow, uSmear, uInvert;
+uniform sampler2D uSprites; uniform vec4 uSp[40]; uniform int uSpN; uniform vec4 uInv, uPac; uniform vec2 uPow; uniform int uAlive[5];
+uniform float uGamePx, uGameOn, uBeat; uniform int uGameCol; uniform uint uFrame, uSeed, uGlitchSeed, uAsciiSeed;
 uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
 out vec4 o;
 const float NG = ${GLYPHS.length}.0;   // символов в атласе
@@ -1000,6 +1167,7 @@ uvec3 pcg3d(uvec3 v){ v = v * 1664525u + 1013904223u; v.x += v.y * v.z; v.y += v
 float h2(vec2 c, uint k){ return float(pcg3d(uvec3(uvec2(ivec2(floor(c)) + 32768), k)).x) * (1.0 / 4294967295.0); }
 float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
 vec3 tap(vec2 f){ return texture(uScene, f / uRes).rgb; }
+float lum(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // эффекты стиля (uFx): x — зеркало, y — 1-битный дизеринг, z — растр точками, w — волна строк.
 // Зеркало и волна сдвигают, откуда берётся картинка; ASCII и растр берут цвет через тот же сдвиг
 vec2 warp(vec2 f){
@@ -1091,6 +1259,51 @@ void main(){
     fg = mix(fg, mix(pal * 1.15, pal * 0.8, lt), 0.25 + 0.4 * max(uAMode.y, uAMode.w));
     fg *= 0.8 + 0.3 * sin(wph * 0.7 + rph * 0.3);
     col = mix(bgc, fg, glyph);
+  }
+  // аркада: Space Invaders и Pac-Man поверх сцены (дальше их тоже печатает ризограф, ксерокс, VHS)
+  if (uGameOn > 0.5) {
+    float P = uGamePx * u1; vec2 sp2 = vec2(frag.x, uRes.y - frag.y) / P;
+    vec3 ink = lum(bgN) > 0.5 ? vec3(0.05) : vec3(0.96);
+    vec4 px = vec4(0.0); float code = 1.0;
+    // точки Pac-Man и энерджайзер
+    if (uPac.w > 0.5 && abs(sp2.y - uPac.x) < 4.0) {
+      float k = floor(sp2.x / 8.0), cx = k * 8.0 + 4.0;
+      bool eaten = uPac.z > 0.0 ? cx < uPac.y : cx > uPac.y;
+      if (!eaten && abs(sp2.x - cx) < 1.0 && abs(sp2.y - uPac.x) < 1.0) { px = vec4(1.0, 0.0, 0.0, 1.0); code = 10.0; }
+      if (uPow.y > 0.5 && length(sp2 - vec2(uPow.x, uPac.x)) < 3.6 && fract(uBeat * 2.0) < 0.6) { px = vec4(1.0, 0.0, 0.0, 1.0); code = 10.0; }
+    }
+    // строй пришельцев
+    if (uInv.w > 0.5) {
+      vec2 rel = sp2 - uInv.xy, cl = floor(rel / 16.0);
+      if (cl.x >= 0.0 && cl.x < 11.0 && cl.y >= 0.0 && cl.y < 5.0 && ((uAlive[int(cl.y)] >> int(cl.x)) & 1) == 1) {
+        float id = (cl.y < 0.5 ? 0.0 : cl.y < 2.5 ? 2.0 : 4.0) + uInv.z;
+        vec2 l = rel - cl * 16.0 + vec2(2.0, 4.0);
+        vec4 t = texelFetch(uSprites, ivec2(int(id) * 16 + int(l.x), int(l.y)), 0);
+        if (t.a > 0.5) { px = t; code = cl.y > 2.5 ? 2.0 : 1.0; }
+      }
+    }
+    for (int i = 0; i < 40; i++) {
+      if (i >= uSpN) break;
+      vec4 q = uSp[i]; float id = q.z; vec2 l = sp2 - q.xy + 8.0;
+      if (id >= 100.0) { id -= 100.0; l.x = 15.999 - l.x; }
+      if (l.x < 0.0 || l.y < 0.0 || l.x >= 16.0 || l.y >= 16.0) continue;
+      vec4 t = texelFetch(uSprites, ivec2(int(id) * 16 + int(l.x), int(l.y)), 0);
+      if (t.a > 0.5) { px = t; code = q.w; }
+    }
+    if (px.a > 0.5) {
+      // цвета: одним цветом (контрастно к фону), аркадные или из схемы
+      vec3 body = ink, white = lum(bgN) > 0.5 ? bgN : vec3(1.0), pupil = ink;
+      if (uGameCol == 1) {
+        int c = int(code + 0.5);
+        body = c == 2 ? vec3(0.2, 1.0, 0.3) : c == 3 ? vec3(1.0, 0.25, 0.2) : c == 4 ? vec3(1.0, 0.92, 0.0) : c == 5 ? vec3(1.0, 0.0, 0.0)
+             : c == 6 ? vec3(1.0, 0.72, 1.0) : c == 7 ? vec3(0.0, 1.0, 1.0) : c == 8 ? vec3(1.0, 0.72, 0.32) : c == 9 ? vec3(0.13, 0.13, 1.0) : c == 10 ? vec3(1.0, 0.72, 0.68) : vec3(1.0);
+        white = vec3(1.0); pupil = vec3(0.13, 0.13, 1.0);
+      } else if (uGameCol == 2) {
+        int c = int(code + 0.5);
+        body = c == 3 || c == 5 || c == 8 ? uRed : c == 4 || c == 10 ? uGold : c == 1 ? ink : uBlue;
+      }
+      col = px.r > 0.5 ? body : px.g > 0.5 ? white : pupil;
+    }
   }
   // инверсия блоков: удар аккорда или дроп выворачивают несколько прямоугольников
   if (uInvert > 0.01) {
@@ -1236,20 +1449,41 @@ const FS_FINAL = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes; uniform sampler2D uSrc;
 uniform vec4 uLook;
-uniform float uTime, uHigh, uLow, uTrack, uRoll, uGrain;
-uniform uint uFrame, uSeed, uLayoutSeed;
+uniform float uTime, uHigh, uLow, uTrack, uRoll, uGrain, uDig, uMosh, uMoshAge;
+uniform uint uFrame, uSeed, uLayoutSeed, uDigSeed, uMoshSeed;
 uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
 out vec4 o;
 ${GLSL_COMMON}
 float gauss(ivec2 c, uint frame){ vec3 u = vec3(pcg3d(uvec3(uvec2(c), frame * 747796405u + uSeed * 2891336453u))) * (1.0 / 4294967295.0); return (u.x + u.y + u.z - 1.5) * 2.0; }
+const float PI = 3.14159265;
 vec3 rgb2yiq(vec3 c){ return vec3(dot(c, vec3(0.299, 0.587, 0.114)), dot(c, vec3(0.596, -0.274, -0.322)), dot(c, vec3(0.211, -0.523, 0.312))); }
 vec3 yiq2rgb(vec3 y){ return vec3(y.x + 0.956 * y.y + 0.621 * y.z, y.x - 0.272 * y.y - 0.647 * y.z, y.x - 1.106 * y.y + 1.703 * y.z); }
 void main(){
   vec2 frag = gl_FragCoord.xy; float H = uRes.y, u1 = H / 1080.0;
   float v = uLook.x;
   vec3 col;
+  // цифровые глитчи: битые макроблоки MPEG (неверный вектор движения, мусор DCT, каша цветности, ошибка до конца строки)
+  // и датамош — блоки уезжают по полю движения, как будто потерялся опорный кадр
+  vec2 base = frag; int dmode = 0; vec2 mb = vec2(0.0); float B = 20.0 * u1;
+  if (uDig > 0.01 || uMosh > 0.01) {
+    mb = floor(frag / B);
+    float rowP = h2(vec2(mb.y, 1.0), uDigSeed), startX = floor(h2(vec2(mb.y, 2.0), uDigSeed) * uRes.x / B);
+    bool slice = rowP < 0.1 * uDig && mb.x >= startX;
+    vec2 sb = floor(mb / vec2(5.0, 3.0));                         // ошибки кучкуются, как настоящие потери пакетов
+    bool single = h2(sb, uDigSeed + 2u) < 0.16 * uDig && h2(mb, uDigSeed + 3u) < 0.75 || h2(mb, uDigSeed + 3u) < 0.02 * uDig;
+    if (slice || single) {
+      float k = slice ? h2(vec2(mb.y, 4.0), uDigSeed) : h2(sb, uDigSeed + 4u) * 0.7 + h2(mb, uDigSeed + 4u) * 0.3;
+      vec2 key = slice ? vec2(mb.y, 5.0) : sb;
+      if (k < 0.45) { base += floor((vec2(h2(key, uDigSeed + 5u), h2(key, uDigSeed + 6u)) - 0.5) * 12.0) * B * 0.5; dmode = 1; }
+      else if (k < 0.75) dmode = 2; else dmode = 3;
+    }
+    if (uMosh > 0.01 && h2(mb, uMoshSeed) < 0.9) {
+      vec2 mv = vec2(fbm(mb * 0.12, uMoshSeed + 7u), fbm(mb * 0.12 + 9.0, uMoshSeed + 8u)) - 0.5;
+      base += floor(mv * 16.0) * u1 * 6.0 * min(uMoshAge, 1.6) * uMosh * 1.3;
+    }
+  }
   if (v > 0.01) {
-    vec2 f = frag;
+    vec2 f = base;
     // кадр срывается вверх на дропе: прокрутка с чёрной полосой между кадрами
     float rollBar = 0.0;
     if (uRoll > 0.0) { float y = f.y / H + uRoll; rollBar = step(fract(y), 0.03); f.y = fract(y) * H; }
@@ -1279,7 +1513,21 @@ void main(){
     col = mix(tap(frag), clamp(yiq2rgb(vec3(Y, iq)), 0.0, 1.0), min(1.0, v * 1.5));
     col *= 1.0 - rollBar;
     col *= 1.0 - 0.1 * v * step(0.5, fract(frag.y / (2.0 * u1)));     // чересстрочная развёртка
-  } else col = tap(frag);
+  } else col = tap(base);
+  if (dmode >= 2) {
+    // мусор DCT: средний цвет блока плюс одна базисная волна; или каша цветности при живой яркости
+    vec2 c0 = (mb + 0.5) * B; vec3 avg = 0.25 * (tap(c0 + vec2(-0.25, -0.25) * B) + tap(c0 + vec2(0.25, -0.25) * B) + tap(c0 + vec2(-0.25, 0.25) * B) + tap(c0 + vec2(0.25, 0.25) * B));
+    vec2 uvb = (frag - mb * B) / B;
+    if (dmode == 2) {
+      vec2 kf = 1.0 + floor(vec2(h2(mb, uDigSeed + 9u), h2(mb, uDigSeed + 10u)) * 7.0);
+      float basis = cos(PI * (uvb.x * 8.0 + 0.5) * kf.x / 8.0) * cos(PI * (uvb.y * 8.0 + 0.5) * kf.y / 8.0);
+      vec3 hue = vec3(h2(mb, uDigSeed + 11u), h2(mb, uDigSeed + 12u), h2(mb, uDigSeed + 13u)) - 0.5;
+      col = clamp(avg + basis * (0.35 + 0.7 * hue), 0.0, 1.0);
+    } else {
+      vec3 y = rgb2yiq(col), a = rgb2yiq(avg);
+      col = clamp(yiq2rgb(vec3(floor(y.x * 6.0) / 6.0, a.yz * 2.2 + (vec2(h2(mb, uDigSeed + 14u), h2(mb, uDigSeed + 15u)) - 0.5) * 0.5)), 0.0, 1.0);
+    }
+  }
   // развёртка (без виньетки: никакого затемнения по краям)
   col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1)));
   vec2 pix = vec2(frag.x, uRes.y - frag.y);
@@ -1317,7 +1565,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1332,7 +1580,8 @@ class Renderer {
     this.vao = gl.createVertexArray();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
-    this.logoTex = this.makeTex(); this.waveTex = this.makeTex(); this.glyphTex = this.makeTex();
+    this.logoTex = this.makeTex(); this.waveTex = this.makeTex(); this.glyphTex = this.makeTex(); this.spriteTex = this.makeTex();
+    this.upload(this.spriteTex, spriteAtlas());
     // атлас ASCII: символы от пустого к плотному, белым по чёрному
     const GL = GLYPHS, gw = 32, gh = 56, gc = document.createElement('canvas'); gc.width = gw * GL.length; gc.height = gh;
     const gx = gc.getContext('2d'); gx.fillStyle = '#000'; gx.fillRect(0, 0, gc.width, gh);
@@ -1407,13 +1656,14 @@ class Renderer {
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.sceneTex); gl.uniform1i(u.uScene, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.waveTex); gl.uniform1i(u.uWave, 3);
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.glyphTex); gl.uniform1i(u.uGlyphs, 4);
+    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, this.spriteTex); gl.uniform1i(u.uSprites, 6);
     if (src) { gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, src); gl.uniform1i(u.uSrc, 5); }
     gl.uniform2f(u.uRes, this.W, this.H);
     for (const [name, v] of Object.entries(s.U)) {
       const loc = u[name]; if (!loc) continue;
       const t = UT[name] || 'f';
       if (t === 'f') gl.uniform1f(loc, v); else if (t === 'i') gl.uniform1i(loc, v); else if (t === 'u') gl.uniform1ui(loc, v >>> 0);
-      else if (t === '3') gl.uniform3fv(loc, v); else gl.uniform4fv(loc, v);
+      else if (t === '3') gl.uniform3fv(loc, v); else if (t === '2') gl.uniform2fv(loc, v); else if (t === 'I') gl.uniform1iv(loc, v); else gl.uniform4fv(loc, v);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
@@ -1470,7 +1720,7 @@ const PALETTES = [
 function paletteAt(ts) {
   const p = state.p, own = [p.blue, p.red, p.gold].map(hexToRgb);
   if (p.palMode !== 'drift') return own;
-  const n = PALETTES.length, off = Math.floor(hash01(p.seed, 77) * n);
+  const n = PALETTES.length, off = Math.floor(hash01(p.seed + (state.m ? state.m.trackSeed : 0), 77) * n);
   const pal = (k) => k <= 0 ? own : PALETTES[(off + k - 1) % n].map(hexToRgb);
   const x = Math.max(0, ts) / Math.max(1, p.palSec), k = Math.floor(x), f = x - k;
   let w = Math.min(1, Math.max(0, (f - 0.55) / 0.45)); w = w * w * (3 - 2 * w);   // держится 55% периода, потом плавно перетекает
@@ -1488,9 +1738,10 @@ function styleSegments(m) {
   const snap = (x) => m.grid ? m.beat0 + Math.round((x - m.beat0) / m.beatLen) * m.beatLen : x;
   const drops = m.sections.filter(s => s.trans === 'drop').map(s => s.t);
   const t = [], s = [];
-  let tt = 0, scene = p.scenes === 'auto' ? Math.floor(hash01(p.seed, 41) * 4) : +p.scenes, mode = -1;
+  let tt = 0, scene = p.scenes === 'auto' ? Math.floor(hash01(p.seed + m.trackSeed, 41) * 4) : +p.scenes, mode = -1;
+  const S0 = (p.seed * 7919 + m.trackSeed) | 0;
   for (let k = 0; tt < m.duration && k < 100000; k++) {
-    const r = (q) => hash01(p.seed * 7919 + k, q);
+    const r = (q) => hash01(S0 + k, q);
     if (k > 0 && p.scenes === 'auto') scene = (scene + 1 + Math.floor(r(5) * 3)) % 4;   // любая другая из трёх
     let nm = Math.floor(r(6) * ASCII_MODES.length); if (nm === mode) nm = (nm + 1) % ASCII_MODES.length; mode = nm;
     const isDrop = drops.some(d => Math.abs(d - tt) < 1e-6);
@@ -1508,10 +1759,31 @@ function styleSegments(m) {
 function seedOfSection(i) { const s = state.p.seed, r = (k) => hash01(s * 7919 + i, k); return [r(1), r(2), r(3), Math.floor(r(4) * 1000)]; }
 function fmt(t) { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + s.toFixed(2).padStart(5, '0'); }
 const WAVE_COLS = 256, WAVE_SPAN = 6;   // «волна» в кадре: 6 с вокруг текущего момента
+// события цифровых глитчей на весь трек: всплески битых блоков, застывания и заикания кадра, датамош на сменах сцен
+function digitalEvents(m, p) {
+  const key = [p.seed, p.digital, p.freeze, p.styleMin, p.styleMax, p.morphSec].join('|');
+  if (m.digCache && m.digCache.key === key) return m.digCache;
+  const r = rng(m.trackSeed * 13 + p.seed * 101 + 9), bursts = [], freezes = [], moshes = [];
+  if (p.digital > 0) for (let t = 1 + r() * 4; t < m.duration; t += (2 + r() * 6) / Math.min(1.5, p.digital)) bursts.push([t, t + 0.12 + r() * 0.5]);
+  if (p.freeze > 0) for (let t = 5 + r() * 8; t < m.duration; t += (7 + r() * 14) / p.freeze) {
+    const loop = r() < 0.55 ? (2 + Math.floor(r() * 3)) / p.fps : 0;            // 0 — застыл, иначе крутит 2–4 кадра
+    freezes.push([t, t + 0.18 + r() * 0.55, loop]);
+  }
+  const segs = styleSegments(m);
+  if (p.digital > 0) for (let i = 1; i < segs.t.length; i++) if (r() < 0.35 * Math.min(1, p.digital)) moshes.push([segs.t[i] - p.morphSec / 2, segs.t[i] + p.morphSec / 2 + 0.5, Math.floor(r() * 1e6)]);
+  m.digCache = { key, bursts, freezes, moshes };
+  return m.digCache;
+}
+function visTime(m, p, ts) {
+  if (!(p.freeze > 0)) return ts;
+  const ev = digitalEvents(m, p).freezes;
+  for (const [a, b, loop] of ev) if (ts >= a && ts < b) return loop ? a + ((ts - a) % loop) : a;
+  return ts;
+}
 function frameState(t) {
   ensureMap();
   const p = state.p, m = state.m;
-  const ts = t + p.syncMs / 1000;
+  const ts = m ? visTime(m, p, t + p.syncMs / 1000) : t + p.syncMs / 1000;
   const U = { uMix: 0, uSceneA: 0, uSceneB: 0, uSeedA: [0.3, 0.5, 0.7, 1], uSeedB: [0.3, 0.5, 0.7, 1],
     uKick: 0, uSpring: 0, uHat: 0, uLow: 0, uMid: 0, uHigh: 0, uLowSlow: 0, uStab: 0, uTension: 0, uFlash: 0, uBeat: 0, uTime: ts % 1000,
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
@@ -1560,6 +1832,22 @@ function frameState(t) {
   U.uSmear = Math.min(1, envSum(m.stabs, ts, 0.25, 1.5)) * Math.min(1, p.glitch);
   U.uInvert = Math.min(1, Math.max(gl > 0.5 ? Math.exp(-(ts - (m.stabs.t[gs] ?? -9)) / 0.06) : 0, dg)) * Math.min(1, p.glitch);
   [U.uBlue, U.uRed, U.uGold] = paletteAt(ts);
+  // цифровые глитчи: случайные всплески, удары аккордов, дроп; датамош — на части смен сцены
+  const dev = digitalEvents(m, p);
+  let dig = 0; for (const [a, b] of dev.bursts) if (ts >= a && ts < b) dig = 1;
+  dig = Math.max(dig, Math.min(1, gl * 1.2), dg);
+  U.uDig = dig * p.digital; U.uDigSeed = (Math.floor(ts * 12.5) * 2654435761 + m.trackSeed) >>> 0;
+  U.uMosh = 0; U.uMoshAge = 0; U.uMoshSeed = 1;
+  for (const [a, b, sd] of dev.moshes) if (ts >= a && ts < b) { U.uMosh = Math.min(1, p.digital) * Math.min(1, (b - ts) / 0.3); U.uMoshAge = ts - a; U.uMoshSeed = sd >>> 0; }
+  // аркада
+  const gs2 = gameState(m, p, ts, (p.res.split('x').map(Number).reduce((w, h) => w / h)));
+  U.uGameOn = (gs2.inv || gs2.pac || gs2.sp.length) && gs2.flick ? 1 : 0;
+  U.uGamePx = p.gamePx; U.uGameCol = { mono: 0, arcade: 1, palette: 2 }[p.gameCol] ?? 0;
+  U.uSpN = Math.min(40, gs2.sp.length); U.uSp = new Float32Array(160); gs2.sp.slice(0, 40).forEach((q, i) => U.uSp.set(q, i * 4));
+  U.uInv = gs2.inv ? [gs2.inv.ox, gs2.inv.oy, gs2.inv.anim, 1] : [0, 0, 0, 0];
+  U.uAlive = Int32Array.from(gs2.inv ? gs2.inv.alive : [0, 0, 0, 0, 0]);
+  U.uPac = gs2.pac ? [gs2.pac.y, gs2.pac.frontier, gs2.pac.dir, 1] : [0, 0, 0, 0];
+  U.uPow = gs2.pac ? [gs2.pac.powX, gs2.pac.powOn ? 1 : 0] : [0, 0];
   const inks = p.risoInks === 'palette' ? [U.uRed, U.uBlue, [0.1, 0.1, 0.1]] : (RISO_INKS[p.risoInks] || RISO_INKS.fluo).map(hexToRgb);
   [U.uInk1, U.uInk2, U.uInk3] = inks;
   U.uRisoScreen = p.risoScreen === 'dots' ? 1 : 0; U.uMisreg = p.misreg;
