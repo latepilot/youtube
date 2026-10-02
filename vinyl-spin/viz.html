@@ -1102,8 +1102,10 @@ const vec3 ANC[33] = vec3[33](
 const vec3 BGD[4] = vec3[4](vec3(0.065, 0.066, 0.054), vec3(0.885, 0.876, 0.862), vec3(0.07, 0.064, 0.036), vec3(0.925, 0.925, 0.918));
 vec3 bgsOf(int id){ return id < 4 ? BGD[id] : id == 6 ? uAmbPaper : uAmbBg; }
 mat2 rot2(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
-float vnoise(vec2 x){ vec2 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hc(i, 91u), hc(i + vec2(1.0, 0.0), 91u), f.x), mix(hc(i + vec2(0.0, 1.0), 91u), hc(i + 1.0, 91u), f.x), f.y); }
+// шум по готовой текстуре 256×256 (один отсчёт вместо четырёх хешей): гладкая интерполяция через сдвиг координаты
+uniform sampler2D uNoise;
+float vnoise(vec2 x){ x += float(uSeed % 211u) * vec2(7.13, 3.71); vec2 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return texture(uNoise, (i + f + 0.5) / 256.0).r; }
 float fbm(vec2 x){ return 0.62 * vnoise(x) + 0.38 * vnoise(x * 2.07 + 13.1); }
 vec2 life(int i){ float f = float(i); return vec2(0.02 * sin(uTime * (0.17 + 0.05 * f) + f * 2.1), 0.014 * sin(uTime * (0.13 + 0.04 * f) + f * 1.3 + 1.0)); }
 float breath(int i){ float f = float(i); return 1.0 + 0.05 * sin(uTime * (0.21 + 0.06 * f) + f) + 0.03 * min(uKick, 1.0) * uKickAmt * step(f, 0.5); }
@@ -1283,7 +1285,6 @@ vec3 sceneLotus(vec2 p, vec4 sd){
   float rb = 0.37 + 0.02 * open, ab = fract(a / TAU * 48.0) - 0.5;
   col += uGold * 0.55 * (1.0 - smoothstep(0.0015, 0.0028, length(vec2(ab * TAU / 48.0 * r, r - rb))));
   col += uGold * 0.25 * (ring(lp, vec2(0.0), rb + 0.025, LW) + ring(lp, vec2(0.0), rb - 0.025, LW));
-  col += uGold * tails(p, vec2(0.0), 0.06, 0.4) * 0.32;
   col += spores(p, uGold, 0.2);
   return col;
 }
@@ -1299,19 +1300,26 @@ vec3 sceneMetatron(vec2 p, vec4 sd){
     q.xz = rot2(ay) * q.xz; q.yz = rot2(ax) * q.yz;
     C[i] = q.xy / (1.0 + q.z * 0.6);                              // лёгкая перспектива
   }
-  float lines = 0.0, circ = 0.0, nodes = 0.0;
+  float lines = 0.0, circ = 0.0, nodes = 0.0, rmax = 0.0;
   for (int i = 0; i < 13; i++) {
-    circ += 1.0 - smoothstep(LW * 0.7, LW * 0.7 + PX * 1.2, abs(length(p - C[i]) - R));
-    nodes += exp(-dot(p - C[i], p - C[i]) / (0.006 * 0.006));
-    for (int j = i + 1; j < 13; j++) {
-      float wv = 0.5 + 0.5 * sin(float(i * 13 + j) * 0.7 - aT() * 0.15);
-      lines += seg(p, C[i], C[j], LW * 0.6) * (0.25 + 0.5 * wv * (0.4 + uPad));
-    }
+    float dc = length(p - C[i]); rmax = max(rmax, length(C[i]));
+    circ += 1.0 - smoothstep(LW * 0.7, LW * 0.7 + PX * 1.2, abs(dc - R));
+    nodes += exp(-dc * dc / (0.006 * 0.006));
   }
-  col += min(lines, 1.5) * mix(uGold, uBlue, 0.3) * 0.55;
+  // 78 линий: ищем ближайшую и сглаживаем один раз; за пределами фигуры не считаем вовсе
+  if (length(p) < rmax + 0.01) {
+    float dmin = 1e9; int bi = 0, bj = 0;
+    for (int i = 0; i < 13; i++) for (int j = i + 1; j < 13; j++) {
+      vec2 pa = p - C[i], ba = C[j] - C[i];
+      float d = length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+      if (d < dmin) { dmin = d; bi = i; bj = j; }
+    }
+    float wv = 0.5 + 0.5 * sin(float(bi * 13 + bj) * 0.7 - aT() * 0.15);
+    lines = (1.0 - smoothstep(LW * 0.6 - PX * 0.6, LW * 0.6 + PX * 0.6, dmin)) * (0.25 + 0.5 * wv * (0.4 + uPad));
+  }
+  col += lines * mix(uGold, uBlue, 0.3) * 0.8;
   col += min(circ, 1.5) * uGold * (0.35 + 0.25 * uMid);
   col += nodes * mix(uGold, vec3(1.0), 0.4) * (0.5 + 0.6 * uPad);
-  col += uGold * tails(p, vec2(0.0), 0.04, 0.45) * 0.3;
   col += spores(p, uGold, 0.22);
   return col;
 }
@@ -1339,7 +1347,6 @@ vec3 sceneTorus(vec2 p, vec4 sd){
   }
   col += min(lines, 1.6) * mix(uGold, uBlue, 0.25) * (0.45 + 0.35 * uPad);
   col += uGold * exp(-length(p) * 9.0) * (0.25 + 0.3 * uPad);
-  col += uGold * tails(vec2(p.x, p.y / tilt), vec2(0.0), 0.05, 0.5) * 0.28;
   col += spores(p, uGold, 0.25);
   return col;
 }
@@ -1804,10 +1811,10 @@ void main(){
   // свечение (эмбиент): яркое расплывается мягким ореолом — три кольца отсчётов
   if (uBloom > 0.01) {
     vec3 g = vec3(0.0);
-    for (int i = 0; i < 12; i++) { float a = float(i) * 0.5236 + 0.26;
+    for (int i = 0; i < 8; i++) { float a = float(i) * 0.7854 + 0.39;
       for (int k = 0; k < 3; k++) { float r = float[3](5.0, 14.0, 34.0)[k], w = float[3](0.5, 0.33, 0.2)[k];
         g += max(tap(frag + vec2(cos(a), sin(a)) * r * u1) - 0.42, 0.0) * w; } }
-    col += g / 12.0 * uBloom * 1.6 * (1.0 - 0.9 * uTone);   // на светлой бумаге почти не светит
+    col += g / 8.0 * uBloom * 1.6 * (1.0 - 0.9 * uTone);   // на светлой бумаге почти не светит
   }
   // развёртка (без виньетки: никакого затемнения по краям)
   col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1)));
@@ -1862,6 +1869,11 @@ class Renderer {
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?';
     this.logoTex = this.makeTex(); this.waveTex = this.makeTex(); this.glyphTex = this.makeTex(); this.spriteTex = this.makeTex();
+    // текстура шума для органических сцен: детерминированная, повторяется по краям
+    this.noiseTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.noiseTex);
+    { const r = rng(20240917), d = new Uint8Array(256 * 256 * 4); for (let i = 0; i < d.length; i++) d[i] = Math.floor(r() * 256);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, d); }
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.REPEAT], [gl.TEXTURE_WRAP_T, gl.REPEAT]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
     this.upload(this.spriteTex, spriteAtlas());
     // атлас ASCII: символы от пустого к плотному, белым по чёрному
     const GL = GLYPHS, gw = 32, gh = 56, gc = document.createElement('canvas'); gc.width = gw * GL.length; gc.height = gh;
@@ -1938,6 +1950,7 @@ class Renderer {
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.waveTex); gl.uniform1i(u.uWave, 3);
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.glyphTex); gl.uniform1i(u.uGlyphs, 4);
     gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, this.spriteTex); gl.uniform1i(u.uSprites, 6);
+    gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.noiseTex); gl.uniform1i(u.uNoise, 7);
     if (src) { gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, src); gl.uniform1i(u.uSrc, 5); }
     gl.uniform2f(u.uRes, this.W, this.H);
     for (const [name, v] of Object.entries(s.U)) {
