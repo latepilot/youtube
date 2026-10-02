@@ -157,7 +157,7 @@ const VDEF = Object.freeze({
   bitrate: 25, gopSec: 0.5,
 });
 const SCENE_NAMES = ['три прибора (тёмная)', 'лист с волной (светлая)', 'кольца и волна (тёмная)', 'поле (светлая)'];
-const AMB_SCENE_NAMES = ['мицелий', 'цветок жизни и семена', 'рябь на воде (светлая)', 'туманность и светило'];
+const AMB_SCENE_NAMES = ['мицелий', 'цветок жизни и семена', 'рябь на воде (светлая)', 'туманность и светило', 'лотос', 'метатронов куб', 'торовое поле'];
 // темы: при переключении эти параметры принимают значения темы (потом их можно крутить)
 const THEME_PRESET = {
   dub: { ascii: 0.5, glitch: 1, ca: 1, fx: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, palSec: 20, digital: 0.8, freeze: 1, games: 'normal', looks: 'auto', grain: 0.05, bloom: 0 },
@@ -587,6 +587,17 @@ function prepareMap(raw, p) {
   // медленная огибающая низа (τ ≈ 1,5 с) — для дыхания света
   const slow = (u8, tau) => { const a = 1 - Math.exp(-1 / (tau * AN.MAP)), out = new Float32Array(u8.length); let y = u8[0] / 255 || 0; for (let i = 0; i < u8.length; i++) { y += a * (u8[i] / 255 - y); out[i] = y; } return out; };
   m.lowSlow = slow(raw.env.low, 1.5); m.fullSlow = slow(raw.env.full, 3);
+  // пэд и хвост реверба: середина и вся громкость, сглаженные на секунды, нормированы на 95-й процентиль трека
+  {
+    const mid = slow(raw.env.mid, 2.5), full = slow(raw.env.full, 4.5), pad = new Float32Array(mid.length);
+    for (let i = 0; i < mid.length; i++) pad[i] = 0.6 * mid[i] + 0.4 * full[i];
+    const srt = Float32Array.from(pad).sort(), p95 = srt[Math.floor(srt.length * 0.95)] || 1;
+    for (let i = 0; i < pad.length; i++) pad[i] = Math.min(1, pad[i] / p95);
+    m.pad = pad;
+    // время течения: интеграл скорости, которая растёт на пэдах (кадр остаётся функцией времени)
+    m.flowT = new Float32Array(pad.length); let acc = 0;
+    for (let i = 0; i < pad.length; i++) { m.flowT[i] = acc; acc += (0.55 + 0.9 * pad[i]) / AN.MAP; }
+  }
   m.sections = raw.sections.map(s => ({ ...s }));
   m.secT = Float64Array.from(m.sections, s => s.t);
   // цепочки эха у аккордов: удар сильнее предыдущего или после паузы — новая цепочка
@@ -798,6 +809,8 @@ uniform float uKick, uSpring, uHat, uLow, uMid, uHigh, uLowSlow, uStab, uTension
 uniform float uKickAmt, uStabAmt, uHatAmt;
 uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed, -
 uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, номер эха, seed
+uniform vec4 uPads[8]; uniform int uPadN;     // долгие события для эмбиента (до 16 с): возраст, сила, seed
+uniform float uPad, uFlowT;                    // медленная огибающая пэда/хвоста и время течения (интеграл скорости)
 uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, номер, -
 uniform sampler2D uWave;                       // 256 колонок вокруг «сейчас»: r — вся громкость, g — низ, b — середина, a — верх
 uniform vec3 uBlue, uRed, uGold;
@@ -1074,7 +1087,7 @@ vec3 sceneField(vec2 p, vec4 sd){
 }
 
 // опорные элементы сцен: (x, y, размер); порядок — левый, центр, правый
-const vec3 ANC[24] = vec3[24](
+const vec3 ANC[33] = vec3[33](
   vec3(-0.53, 0.0, 0.10), vec3(0.0, 0.0, 0.27), vec3(0.53, 0.0, 0.13),
   vec3(-0.458, 0.0, 0.12), vec3(0.028, 0.0, 0.29), vec3(0.562, 0.0, 0.08),
   vec3(-0.258, 0.0, 0.10), vec3(0.0, 0.0, 0.30), vec3(0.45, 0.0, 0.12),
@@ -1082,7 +1095,10 @@ const vec3 ANC[24] = vec3[24](
   vec3(-0.45, 0.05, 0.2), vec3(0.0, 0.0, 0.3), vec3(0.45, -0.05, 0.2),
   vec3(-0.5, 0.0, 0.12), vec3(0.0, 0.0, 0.33), vec3(0.5, 0.0, 0.12),
   vec3(-0.42, 0.1, 0.2), vec3(0.05, 0.0, 0.3), vec3(0.45, -0.1, 0.2),
-  vec3(-0.45, 0.0, 0.15), vec3(0.0, 0.0, 0.25), vec3(0.45, 0.0, 0.15));
+  vec3(-0.45, 0.0, 0.15), vec3(0.0, 0.0, 0.25), vec3(0.45, 0.0, 0.15),
+  vec3(-0.42, 0.0, 0.12), vec3(0.0, 0.0, 0.34), vec3(0.42, 0.0, 0.12),
+  vec3(-0.42, 0.0, 0.12), vec3(0.0, 0.0, 0.34), vec3(0.42, 0.0, 0.12),
+  vec3(-0.35, 0.0, 0.18), vec3(0.0, 0.0, 0.35), vec3(0.35, 0.0, 0.18));
 const vec3 BGD[4] = vec3[4](vec3(0.065, 0.066, 0.054), vec3(0.885, 0.876, 0.862), vec3(0.07, 0.064, 0.036), vec3(0.925, 0.925, 0.918));
 vec3 bgsOf(int id){ return id < 4 ? BGD[id] : id == 6 ? uAmbPaper : uAmbBg; }
 mat2 rot2(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
@@ -1105,7 +1121,19 @@ vec2 featWarp(vec2 q, int id, vec2 M[3], float sM[3], vec3 ang){
 // ================= ЭМБИЕНТ: органика, природа, эзотерика =================
 // фон схемы uAmbBg, основной uBlue, второй uRed, светлый uGold (в эмбиенте сюда приходит органическая схема)
 float fbm5(vec2 x){ float a = 0.5, s = 0.0; mat2 R = mat2(0.8, 0.6, -0.6, 0.8); for (int i = 0; i < 5; i++) { s += a * vnoise(x); x = R * x * 2.02 + 3.1; a *= 0.5; } return s / 0.97; }
-float aT(){ return uTime * uFlow; }
+float aT(){ return uFlowT * uFlow; }   // течение ускоряется на пэдах
+// мягкое кольцо-волна от долгого события: расходится с замедлением, расплывается и долго гаснет — как хвост реверба
+float tailRing(vec2 p, vec2 c, float r0, float spread, vec4 e){
+  float age = e.x, r = r0 + spread * (1.0 - exp(-age / 4.5));
+  float w = 0.004 + 0.035 * (1.0 - exp(-age / 3.0));
+  float a = e.y * (1.0 - exp(-age / 0.8)) * exp(-age / 7.0);
+  return a * exp(-pow((length(p - c) - r) / w, 2.0));
+}
+float tails(vec2 p, vec2 c, float r0, float spread){
+  float s = 0.0;
+  for (int i = 0; i < 8; i++) { if (i >= uPadN) break; s += tailRing(p, c, r0, spread * (0.8 + 0.4 * fract(uPads[i].z * 3.7)), uPads[i]); }
+  return s * uStabAmt;
+}
 // споры и пыльца: редкие светящиеся точки, плывут вверх, мерцают на хэтах
 vec3 spores(vec2 p, vec3 c, float density){
   vec2 pp = p + vec2(0.0, -aT() * 0.012);
@@ -1126,7 +1154,7 @@ vec3 sceneMyc(vec2 p, vec4 sd){
   float t = aT() * 0.035;
   vec2 q = p * 1.7 + sd.xy * 13.0;
   vec2 w = vec2(fbm5(q + vec2(t, 0.0)), fbm5(q + vec2(5.2, 1.3) - t)) - 0.5;
-  float f = fbm5(q + 2.4 * w + vec2(0.0, t * 0.6));
+  float f = fbm5(q + (2.0 + 1.2 * uPad) * w + vec2(0.0, t * 0.6));
   vec3 col = uAmbBg * (0.85 + 0.3 * f);
   col += uBlue * 0.22 * smoothstep(0.45, 0.95, f) * (0.6 + 0.6 * uLowSlow);
   col += uRed * 0.12 * smoothstep(0.55, 1.0, fbm5(q * 0.6 - w * 2.0 + 9.0));
@@ -1180,8 +1208,8 @@ vec3 sceneTopo(vec2 p, vec4 sd){
   float h = fbm5(p * 1.25 + sd.xy * 9.0 + vec2(t, -t * 0.7)) + 0.22 * fbm5(p * 3.1 - vec2(t * 1.4, 0.0));
   for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
     vec2 pos = vec2(fract(s.w * 7.13) - 0.5, fract(s.w * 3.71) - 0.5) * vec2(1.4, 0.75);
-    float rr = length(p - pos), front = s.x * 0.16;
-    h += sin((rr - front) * 85.0) * exp(-s.x * 0.8) * exp(-abs(rr - front) * 14.0) * s.y * 0.05 * uStabAmt;
+    float rr = length(p - pos), front = 0.32 * (1.0 - exp(-s.x / 3.5));
+    h += sin((rr - front) * 85.0) * exp(-s.x * 0.35) * exp(-abs(rr - front) * 14.0) * s.y * 0.05 * uStabAmt;
   }
   for (int i = 0; i < 4; i++) { if (i >= uHatN) break; vec4 s = uHats[i];
     vec2 pos = vec2(hc(vec2(s.z, 1.0), 211u) - 0.5, hc(vec2(s.z, 2.0), 211u) - 0.5) * vec2(1.5, 0.8);
@@ -1203,7 +1231,7 @@ vec3 sceneNebula(vec2 p, vec4 sd){
   vec2 q = p * 1.15 + sd.xy * 11.0;
   vec2 a = vec2(fbm5(q + vec2(0.0, t)), fbm5(q + vec2(5.2, 1.3) + t));
   vec2 b = vec2(fbm5(q + 3.0 * a + vec2(1.7, 9.2) - t * 0.5), fbm5(q + 3.0 * a + vec2(8.3, 2.8)));
-  float f = fbm5(q + 3.0 * b);
+  float f = fbm5(q + (2.6 + 1.0 * uPad) * b);
   vec3 col = mix(uAmbBg, uBlue * 0.55, clamp(f * f * 1.8, 0.0, 1.0));
   col = mix(col, uRed * 0.75, clamp(length(a - 0.5) * 1.3, 0.0, 1.0) * 0.55);
   col = mix(col, uGold * 0.9, clamp(b.x * b.x * 1.4, 0.0, 1.0) * 0.35 * (0.6 + 0.6 * uLowSlow));
@@ -1216,14 +1244,109 @@ vec3 sceneNebula(vec2 p, vec4 sd){
   float st = min(uStab, 1.2) * uStabAmt;
   float ang = atan(p.y, p.x);
   col += uGold * 0.3 * (ring(p, oc, 0.19, LW) * step(0.0, sin(ang * 24.0 + uTime * 0.2)) + ring(p, oc, 0.31, LW) * 0.7 + ring(p, oc, 0.43, LW * 0.8) * 0.4 * step(0.6, sin(ang * 3.0 - uTime * 0.1)));
-  for (int i = 0; i < 12; i++) { if (i >= uStabN) break; vec4 s = uStabs[i];
-    col += uGold * ring(p, oc, orR + s.x * 0.22, LW) * s.y * exp(-s.x / 1.4) * 0.5 * uStabAmt * smoothstep(0.0, 0.05, s.x); }
+  // от светила медленно расходятся мягкие волны и долго гаснут — пространство, как у реверба
+  col += mix(uGold, uBlue, 0.25) * tails(p, oc, orR + 0.01, 0.55) * 0.38;
+  col += spores(p, uGold, 0.25);
+  return col;
+}
+
+// туманный фон для геометрии: медленная дымка, раздувается на пэдах
+vec3 hazeBg(vec2 p, vec4 sd){
+  float f = fbm5(p * 1.2 + vec2(aT() * 0.02, sd.x * 7.0) + 0.4 * vec2(fbm5(p * 0.7 - aT() * 0.01), 0.0));
+  return uAmbBg + uRed * (0.12 + 0.12 * uPad) * smoothstep(0.42, 0.95, f) + uBlue * (0.18 + 0.18 * uPad) * exp(-dot(p, p) * 3.0);
+}
+// 8. Лотос: кольца лепестков-контуров раскрываются на длинных пэдах, в сердцевине — семена, вокруг — пояс точек
+vec3 sceneLotus(vec2 p, vec4 sd){
+  vec3 col = hazeBg(p, sd);
+  float open = 0.55 + 0.35 * uPad + 0.08 * sin(aT() * 0.07 + sd.y * 6.0);
+  vec2 lp = rot2(aT() * 0.012 + sd.x * 6.0) * p;
+  float r = length(lp), a = atan(lp.y, lp.x), lines = 0.0, fill = 0.0;
+  for (int k = 0; k < 4; k++) {
+    float fk = float(k), n = 8.0 + 4.0 * fk, R0 = 0.04 + 0.065 * fk * (0.85 + 0.25 * open);
+    float L = (0.075 + 0.025 * fk) * (0.6 + 0.6 * open);
+    float phi = (fract(a * n / TAU + 0.5 * mod(fk, 2.0) + 0.02 * sin(aT() * 0.1 + fk)) - 0.5) * TAU / n;
+    float edge = R0 + L * pow(max(cos(phi * n * 0.5), 0.0), 0.65);
+    float inP = step(R0, r) * step(r, edge);
+    lines += (1.0 - smoothstep(LW * 0.8, LW * 0.8 + PX * 1.3, abs(r - edge))) * step(R0 - 0.002, r);
+    lines += 0.45 * (1.0 - smoothstep(LW * 0.5, LW * 0.5 + PX, abs(phi) * r)) * inP;          // жилка лепестка
+    fill += inP * smoothstep(R0, edge, r) * (0.5 + 0.5 * sin(fk * 1.7 + aT() * 0.05));
+  }
+  col += fill * mix(uBlue, uRed, 0.4) * 0.12 * (0.6 + 0.6 * uPad);
+  col += min(lines, 1.4) * uGold * (0.3 + 0.35 * uPad + 0.25 * uMid);
+  // сердцевина: мелкая спираль семян
+  float cR = 0.0062, n0 = (r / cR) * (r / cR), seeds = 0.0;
+  for (int k = -6; k <= 6; k++) { float n = floor(n0) + float(k); if (n < 1.0 || n > 140.0) continue;
+    float aa = n * 2.39996323; vec2 pt = cR * sqrt(n) * vec2(cos(aa), sin(aa));
+    seeds += 1.0 - smoothstep(0.0012, 0.0024, length(lp - pt)); }
+  col += seeds * uGold * 0.8;
+  // пояс точек и два тонких круга
+  float rb = 0.37 + 0.02 * open, ab = fract(a / TAU * 48.0) - 0.5;
+  col += uGold * 0.55 * (1.0 - smoothstep(0.0015, 0.0028, length(vec2(ab * TAU / 48.0 * r, r - rb))));
+  col += uGold * 0.25 * (ring(lp, vec2(0.0), rb + 0.025, LW) + ring(lp, vec2(0.0), rb - 0.025, LW));
+  col += uGold * tails(p, vec2(0.0), 0.06, 0.4) * 0.32;
+  col += spores(p, uGold, 0.2);
+  return col;
+}
+// 9. Метатронов куб: 13 кругов «плода жизни» и все линии между центрами, медленно поворачивается в объёме
+vec3 sceneMetatron(vec2 p, vec4 sd){
+  vec3 col = hazeBg(p, sd);
+  float R = 0.075 * (1.0 + 0.06 * uPad + 0.03 * uLowSlow);
+  float ay = 0.55 * sin(aT() * 0.031 + sd.x * 6.0), ax = 0.35 * sin(aT() * 0.023 + sd.y * 6.0), az = aT() * 0.01;
+  vec2 C[13];
+  for (int i = 0; i < 13; i++) {
+    vec2 c = i == 0 ? vec2(0.0) : (i < 7 ? 2.0 : 4.0) * vec2(cos(float(i) * 1.0472 + 0.5236), sin(float(i) * 1.0472 + 0.5236));
+    vec3 q = vec3(rot2(az) * c * R, 0.0);
+    q.xz = rot2(ay) * q.xz; q.yz = rot2(ax) * q.yz;
+    C[i] = q.xy / (1.0 + q.z * 0.6);                              // лёгкая перспектива
+  }
+  float lines = 0.0, circ = 0.0, nodes = 0.0;
+  for (int i = 0; i < 13; i++) {
+    circ += 1.0 - smoothstep(LW * 0.7, LW * 0.7 + PX * 1.2, abs(length(p - C[i]) - R));
+    nodes += exp(-dot(p - C[i], p - C[i]) / (0.006 * 0.006));
+    for (int j = i + 1; j < 13; j++) {
+      float wv = 0.5 + 0.5 * sin(float(i * 13 + j) * 0.7 - aT() * 0.15);
+      lines += seg(p, C[i], C[j], LW * 0.6) * (0.25 + 0.5 * wv * (0.4 + uPad));
+    }
+  }
+  col += min(lines, 1.5) * mix(uGold, uBlue, 0.3) * 0.55;
+  col += min(circ, 1.5) * uGold * (0.35 + 0.25 * uMid);
+  col += nodes * mix(uGold, vec3(1.0), 0.4) * (0.5 + 0.6 * uPad);
+  col += uGold * tails(p, vec2(0.0), 0.04, 0.45) * 0.3;
+  col += spores(p, uGold, 0.22);
+  return col;
+}
+// 10. Торовое поле: круги, чьи центры лежат на круге, — тор под наклоном; вращается, дышит на пэдах; сверху сияние
+vec3 sceneTorus(vec2 p, vec4 sd){
+  vec3 col = uAmbBg;
+  // сияние: вертикальные занавеси, медленно колышутся
+  float cur = fbm5(vec2(p.x * 3.0 + 0.6 * fbm5(p * 1.5 + aT() * 0.02), aT() * 0.03 + sd.x * 5.0));
+  col += mix(uBlue, uRed, smoothstep(0.3, 0.8, cur)) * pow(smoothstep(0.45, 0.9, cur), 2.0) * smoothstep(-0.1, 0.45, p.y) * (0.25 + 0.3 * uPad);
+  float tilt = 0.42 + 0.12 * sin(aT() * 0.02 + sd.y * 6.0), R = 0.15 * (1.0 + 0.08 * uPad + 0.03 * uLowSlow);
+  vec2 q = vec2(p.x, p.y / tilt);
+  float lines = 0.0;
+  for (int i = 0; i < 28; i++) {
+    float a = float(i) / 28.0 * TAU + aT() * 0.03;
+    vec2 c = R * vec2(cos(a), sin(a));
+    float d = abs(length(q - c) - R) * tilt;
+    float front = 0.55 + 0.45 * sin(a);                       // передняя половина ярче
+    lines += (1.0 - smoothstep(LW * 0.6, LW * 0.6 + PX * 1.2, d)) * (0.25 + 0.6 * front) * (0.6 + 0.4 * sin(float(i) * 0.9 - aT() * 0.2));
+  }
+  // малый тор внутри крутится навстречу
+  for (int i = 0; i < 16; i++) {
+    float a = -float(i) / 16.0 * TAU - aT() * 0.05;
+    vec2 c = 0.45 * R * vec2(cos(a), sin(a));
+    lines += (1.0 - smoothstep(LW * 0.5, LW * 0.5 + PX, abs(length(q - c) - 0.45 * R) * tilt)) * 0.35;
+  }
+  col += min(lines, 1.6) * mix(uGold, uBlue, 0.25) * (0.45 + 0.35 * uPad);
+  col += uGold * exp(-length(p) * 9.0) * (0.25 + 0.3 * uPad);
+  col += uGold * tails(vec2(p.x, p.y / tilt), vec2(0.0), 0.05, 0.5) * 0.28;
   col += spores(p, uGold, 0.25);
   return col;
 }
 
 vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : id == 3 ? sceneField(p, sd)
-  : id == 4 ? sceneMyc(p, sd) : id == 5 ? sceneFlower(p, sd) : id == 6 ? sceneTopo(p, sd) : sceneNebula(p, sd); }
+  : id == 4 ? sceneMyc(p, sd) : id == 5 ? sceneFlower(p, sd) : id == 6 ? sceneTopo(p, sd) : id == 7 ? sceneNebula(p, sd)
+  : id == 8 ? sceneLotus(p, sd) : id == 9 ? sceneMetatron(p, sd) : sceneTorus(p, sd); }
 // мелкие детали поверх любой сцены: полоска-спектр, развёртка по такту, спутники, метки по углам
 vec3 details(vec3 c, vec2 p){
   vec3 lc = mix(vec3(0.9, 0.89, 0.85), vec3(0.08, 0.08, 0.07), uTone);
@@ -1723,7 +1846,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1909,11 +2032,12 @@ function styleSegments(m) {
   const snap = (x) => m.grid ? m.beat0 + Math.round((x - m.beat0) / m.beatLen) * m.beatLen : x;
   const drops = m.sections.filter(s => s.trans === 'drop').map(s => s.t);
   const t = [], s = [];
-  let tt = 0, scene = scSel === 'auto' ? Math.floor(hash01(p.seed + m.trackSeed, 41) * 4) : +scSel, mode = -1;
+  const nS = amb ? AMB_SCENE_NAMES.length : 4;
+  let tt = 0, scene = scSel === 'auto' ? Math.floor(hash01(p.seed + m.trackSeed, 41) * nS) : +scSel, mode = -1;
   const S0 = (p.seed * 7919 + m.trackSeed) | 0;
   for (let k = 0; tt < m.duration && k < 100000; k++) {
     const r = (q) => hash01(S0 + k, q);
-    if (k > 0 && scSel === 'auto') scene = (scene + 1 + Math.floor(r(5) * 3)) % 4;   // любая другая из трёх
+    if (k > 0 && scSel === 'auto') scene = (scene + 1 + Math.floor(r(5) * (nS - 1))) % nS;   // любая другая
     let nm = Math.floor(r(6) * ASCII_MODES.length); if (nm === mode) nm = (nm + 1) % ASCII_MODES.length; mode = nm;
     const isDrop = drops.some(d => Math.abs(d - tt) < 1e-6);
     const fxSet = amb ? AMB_FX : FX_MODES;
@@ -1987,7 +2111,7 @@ function frameState(t) {
   const BG = [[0.065, 0.066, 0.054], [0.885, 0.876, 0.862], [0.07, 0.064, 0.036], [0.925, 0.925, 0.918]];
   // эмбиент: фон — из органической схемы, «рябь» — тёплая бумага
   const amb = ambPaletteAt(ts);
-  U.uTheme = p.theme === 'ambient' ? 1 : 0; U.uAmbBg = amb[0]; U.uFlow = p.flow; U.uBloom = p.bloom;
+  U.uTheme = p.theme === 'ambient' ? 1 : 0; U.uAmbBg = amb[0]; U.uFlow = p.flow; U.uBloom = p.bloom * (0.75 + 0.6 * sample(m.pad, ts));   // на пэдах свечение разливается шире
   U.uAmbPaper = [0, 1, 2].map(i => 0.94 * [1, 0.965, 0.89][i] * 0.88 + amb[3][i] * 0.12);
   const bgOf = (k) => k < 4 ? BG[k] : k === 6 ? U.uAmbPaper : amb[0];
   U.uBgA = bgOf(U.uSceneA); U.uBgB = bgOf(U.uSceneB);
@@ -2043,6 +2167,9 @@ function frameState(t) {
   U.uHat = Math.min(1.5, envSum(m.hats, ts, 0.07, 0.5));
   U.uStab = Math.min(1.5, envSum(m.stabs, ts, 0.35, 2));
   recentEvents(m.kicks, ts, 2.5, 6).forEach((i, k) => { U.uKicks.set([ts - m.kicks.t[i], m.kicks.s[i], hash01(i, 5), 0], k * 4); U.uKickN = k + 1; });
+  U.uPad = sample(m.pad, ts); U.uFlowT = (ts < 0 ? ts : sample(m.flowT, ts)) % 2000;
+  U.uPads = new Float32Array(32); U.uPadN = 0;
+  for (const i of recentEvents(m.stabs, ts, 16, 60)) { if (m.stabEcho[i] !== 0 || U.uPadN >= 8) continue; U.uPads.set([ts - m.stabs.t[i], m.stabs.s[i], hash01(i, 17), 0], U.uPadN * 4); U.uPadN++; }
   recentEvents(m.stabs, ts, 4.5, 12).forEach((i, k) => { U.uStabs.set([ts - m.stabs.t[i], m.stabs.s[i], m.stabEcho[i], hash01(m.stabChain[i], 9)], k * 4); U.uStabN = k + 1; });
   recentEvents(m.hats, ts, 0.5, 4).forEach((i, k) => { U.uHats.set([ts - m.hats.t[i], m.hats.s[i], i, 0], k * 4); U.uHatN = k + 1; });
   // волна: громкость полос вокруг «сейчас»
