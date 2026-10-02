@@ -85,3 +85,4 @@
 - Итог должен работать **на маке пользователя**: macOS, M2 Pro, 32 GB, Node 22, ffmpeg 8.0.1, Google Chrome. `index.html` открывается с диска в Chrome, без CDN и без сборки. `render.mjs` ставится через `npm i -D playwright`.
 - Репозиторий `latepilot/youtube` был пустым, проект живёт в `vinyl-spin/`. Ветка `claude/video-template-zoom-noise-lbuhje`.
 - С пользователем общаться по-русски, на «ты».
+- Репозиторий у пользователя лежит в `~/CODE/youtube`. После каждой завершённой работы (коммит и пуш) **в самом конце ответа** давай команду для обновления одной строкой в блоке кода: `cd ~/CODE/youtube && git pull`.
