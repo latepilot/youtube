@@ -169,7 +169,7 @@
    ========================================================================== */
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  theme: 'dub', lfo: {}, liveDevice: '', livePair: 0, liveGain: 0, liveSens: 1, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
+  theme: 'dub', lfo: {}, vidMode: 'fx', liveDevice: '', livePair: 0, liveGain: 0, liveSens: 1, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
@@ -252,6 +252,7 @@ const SCHEMA = [
   ]},
   { title: 'Своё видео', open: true, vidOnly: true, items: [
     { key: 'vidOn', label: 'Показывать видео вместо сцен', type: 'check' },
+    { key: 'vidMode', label: 'Что делать с видео', type: 'select', options: [['fx', 'эффекты и расщепление'], ['clean', 'только видео и логотип (без эффектов)']] },
     { key: 'vidDis', label: 'Расщепление: сколько кадра уходит в пиксели и символы', min: 0, max: 1, step: 0.01 },
     { key: 'vidCell', label: 'Размер символа, px при 1080p', min: 5, max: 40, step: 0.5 },
     { key: 'vidPix', label: 'Размер пикселя, px при 1080p', min: 4, max: 64, step: 1 },
@@ -1115,7 +1116,7 @@ uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed
 uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, номер эха, seed
 uniform vec4 uPads[8]; uniform int uPadN;     // долгие события для эмбиента (до 16 с): возраст, сила, seed
 uniform float uPad, uFlowT;
-uniform sampler2D uVideo; uniform vec2 uVidRes;               // своё видео (сцена 11)
+uniform sampler2D uVideo; uniform vec2 uVidRes; uniform int uPlain;   // uPlain: видео как есть, целиком, без эффектов               // своё видео (сцена 11)
 uniform vec4 uGeo[48]; uniform vec4 uGeoP, uGeoS, uGeoR, uGeoX; uniform int uGeoBoth;   // геометрия (см. geoShape)                    // медленная огибающая пэда/хвоста и время течения (интеграл скорости)
 uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, номер, -
 uniform sampler2D uWave;                       // 256 колонок вокруг «сейчас»: r — вся громкость, g — низ, b — середина, a — верх
@@ -1623,6 +1624,13 @@ vec3 details(vec3 c, vec2 p){
 void main(){
   PX = 1.0 / uRes.y; LW = max(0.55 * PX, 0.75 / 1080.0);
   vec2 p0 = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+  if (uPlain == 1) {
+    // видео целиком (вписано, поля чёрные), без зума, дыхания и деталей
+    float A = uRes.x / uRes.y, V = uVidRes.x / max(uVidRes.y, 1.0), s = V > A ? A / V : 1.0;
+    vec2 uv = vec2(p0.x / (V * s), -p0.y / s) + 0.5;
+    o = vec4(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) ? vec3(0.0) : texture(uVideo, uv).rgb, 1.0);
+    return;
+  }
   // кадр дышит: медленный зум и крен от низов, толчок на кик
   float zoom = 1.0 + 0.025 * uLowSlow + 0.018 * min(uKick, 1.0) * uKickAmt + 0.012 * sin(uTime * 0.11);
   float rot = 0.012 * sin(uTime * 0.07) + 0.004 * uSpring * uKickAmt;
@@ -2113,12 +2121,14 @@ void main(){
   // развёртка (без виньетки: никакого затемнения по краям)
   col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1))) * (1.0 - uClean);   // на снимке развёртки нет
   vec2 pix = vec2(frag.x, uRes.y - frag.y);
+  float l = lum(col);
+  if (uGrain > 0.0) col += uGrain * (0.55 + 0.9 * l * (1.0 - l)) * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.4))), uFrame);
+  col = clamp(col, 0.0, 1.0);
+  // логотип — самым последним слоем: ни зерно, ни эффекты на него не попадают
   if (uHasLogo == 1) {
     vec2 lu = (pix - uLogoRect.xy) / uLogoRect.zw;
     if (all(greaterThanEqual(lu, vec2(0.0))) && all(lessThan(lu, vec2(1.0)))) { vec4 lg = texture(uLogo, lu) * uLogoOpacity; col = col * (1.0 - lg.a) + lg.rgb; }
   }
-  float l = lum(col);
-  if (uGrain > 0.0) col += uGrain * (0.55 + 0.9 * l * (1.0 - l)) * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.4))), uFrame);
   o = vec4(clamp(col, 0.0, 1.0), 1.0);
 }`;
 
@@ -2147,7 +2157,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uVidCol: 'i', uVidRes: '2', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uVidCol: 'i', uVidRes: '2', uPlain: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -2390,10 +2400,14 @@ function visTime(m, p, ts) {
   for (const [a, b, loop] of ev) if (ts >= a && ts < b) return loop ? a + ((ts - a) % loop) : a;
   return ts;
 }
+// «только видео и логотип»: всё, что рисуют эффекты, выключено; видео целиком, без зерна и развёртки
+const CLEAN_U = { uPlain: 1, uVid: 0, uAscii: 0, uGlitch: 0, uCA: 0, uFx: [0, 0, 0, 0], uSmear: 0, uInvert: 0, uLook: [0, 0, 0, 0], uDig: 0, uMosh: 0,
+  uTrack: 0, uRoll: 0, uBloom: 0, uGrain: 0, uClean: 1, uGameOn: 0, uFlash: 0, uMix: 0 };
+const cleanVideo = () => !!(state.vid && state.p.vidOn && state.p.vidMode === 'clean');
 function frameState(t) {
   ensureMap();
   const m = state.m, p = modParams(state.p, t + state.p.syncMs / 1000);   // значения с LFO в этот момент
-  const ts = m ? visTime(m, p, t + p.syncMs / 1000) : t + p.syncMs / 1000;
+  const ts = m && !cleanVideo() ? visTime(m, p, t + p.syncMs / 1000) : t + p.syncMs / 1000;
   const U = { uMix: 0, uSceneA: 0, uSceneB: 0, uSeedA: [0.3, 0.5, 0.7, 1], uSeedB: [0.3, 0.5, 0.7, 1],
     uKick: 0, uSpring: 0, uHat: 0, uLow: 0, uMid: 0, uHigh: 0, uLowSlow: 0, uStab: 0, uTension: 0, uFlash: 0, uBeat: 0, uTime: ts % 1000,
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
@@ -2401,7 +2415,7 @@ function frameState(t) {
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
     uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uLook: [0, 0, 0, 0], uLayoutSeed: 1, uTrack: 0, uRoll: 0, uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
-  if (!m) { if (state.vid && p.vidOn) Object.assign(U, { uSceneA: 11, uSceneB: 11, uVidRes: [state.vid.w, state.vid.h], uVid: Math.max(0.001, p.vidDis), uVidCell: p.vidCell, uVidPix: p.vidPix, uVidCol: { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0, uVidFlow: p.vidFlow, uVidReact: p.vidReact, uBgA: [0, 0, 0], uBgB: [0, 0, 0] }); return st; }
+  if (!m) { if (state.vid && p.vidOn) Object.assign(U, { uSceneA: 11, uSceneB: 11, uVidRes: [state.vid.w, state.vid.h], uVid: Math.max(0.001, p.vidDis), uVidCell: p.vidCell, uVidPix: p.vidPix, uVidCol: { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0, uVidFlow: p.vidFlow, uVidReact: p.vidReact, uBgA: [0, 0, 0], uBgB: [0, 0, 0] }); if (cleanVideo()) Object.assign(U, CLEAN_U); return st; }
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
   // стили перетекают: на границе отрезка (каждые styleMin–styleMax с) — к случайной другой сцене
   const segs = styleSegments(m);
@@ -2508,6 +2522,7 @@ function frameState(t) {
     for (let c = 0; c < 4; c++) wv[i * 4 + c] = Math.round(sample(m.env[keys[c]], tt));
   }
   st.wave = wv; st.sec = sec; st.si = si;
+  if (cleanVideo()) Object.assign(U, CLEAN_U);
   return st;
 }
 
@@ -2696,7 +2711,7 @@ function setT(t) {
   redraw();
 }
 function play(on) {
-  if (!state.m) return;
+  if (!state.m && !state.vid) return;
   if (state.live) { clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶'; if (on) loop(); else redraw(); return; }
   if (!on && clock.playing) clock.t = currentT();
   clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶';
@@ -2889,7 +2904,7 @@ async function setFile(kind, file) {
     // трека нет — берём звук из самого видео (анализ и рендер)
     if (!state.audioFile) {
       await setFile('audio', file).catch(() => { });
-      if (!state.m) { await setFile('audio', null); $('anStatus').className = 'note warn'; $('anStatus').textContent = 'В видео нет звука (или браузер его не прочитал) — перетащи трек в «Трек».'; }
+      if (!state.m) { await setFile('audio', null); state.duration = el.duration; $('anStatus').className = 'note'; $('anStatus').textContent = 'В видео нет звука: ролик соберётся без звука по длине видео (или перетащи трек в «Трек»).'; }
     }
     await vidSeek(clock.t); redraw();
     return;
@@ -2934,23 +2949,26 @@ async function postJSON(url, body) {
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j;
 }
 async function renderVideo() {
-  if (!state.audioFile || !state.m) throw new Error('сначала загрузи трек');
+  if (!(state.audioFile && state.m) && !state.vid) throw new Error('сначала загрузи трек или видео');
   const p = state.p, { W, H } = parseRes(p.res), fps = p.fps;
   play(false);
   $('rReport').hidden = true; $('bReveal').hidden = true; studio.cancel = false; studio.jobId = null;
-  if (studio.upload?.file !== state.audioFile) {
+  if (!state.audioFile) {
+    // видео без звука: длина ролика — длина видео (с учётом скорости), звука в файле нет
+    state.duration = state.vid.dur / Math.max(0.0625, p.vidSpeed); studio.upload = { id: null };
+  } else if (studio.upload?.file !== state.audioFile) {
     rStatus(`Передаю звук (${(state.audioFile.size / 1e6).toFixed(0)} МБ)…`);
     const r = await fetch('/api/audio?name=' + encodeURIComponent(state.audioFile.name), { method: 'POST', body: state.audioFile });
     const j = await r.json(); if (!r.ok) throw new Error(j.error);
     studio.upload = { file: state.audioFile, ...j };
   }
-  state.duration = studio.upload.T;
+  if (state.audioFile) state.duration = studio.upload.T;
   const T = durationOf(), total = Math.ceil(T * fps - 1e-9), range = $('rRange').value;
   const start = range === 'here' ? Math.min(total - 1, frameIndex(clock.t)) : 0;
   const count = range === 'all' ? total : Math.min(20 * fps, total - start);
   const bitrate = Math.round(p.bitrate * 1e6), gop = Math.max(1, Math.round(p.gopSec * fps));
   const sup = await VZ.h264Support(W, H, fps, bitrate);
-  const job = await postJSON('/api/job', { audioId: studio.upload.id, W, H, fps, bitrate, gop, encoder: sup.supported ? 'webcodecs' : 'raw', codec: sup.codec,
+  const job = await postJSON('/api/job', { audioId: studio.upload.id || undefined, W, H, fps, bitrate, gop, encoder: sup.supported ? 'webcodecs' : 'raw', codec: sup.codec,
     startFrame: start, count, totalFrames: total, name: baseName() + ' (viz)' });
   studio.jobId = job.id;
   document.body.classList.add('exporting'); $('bRender').disabled = true; $('bCancel').hidden = false; $('rBar').hidden = false; $('rBar').value = 0;
@@ -3053,6 +3071,16 @@ function initUI() {
     } catch (e) { $('lvStatus').textContent = 'Не получилось включить вход: ' + e.message; }
   };
   $('bOut').onclick = openOutput;
+  // «Разрешение как у видео»: ролик в размере исходника (ширина кратна 8, высота 4 — так требует упаковка кадров)
+  { const box = document.querySelector('#controls details[data-vid]'), div = document.createElement('div');
+    div.className = 'btns'; div.innerHTML = '<button id="bVidRes" title="Ролик будет того же размера, что и видео">Разрешение как у видео</button>'; box.appendChild(div);
+    $('bVidRes').onclick = () => {
+      if (!state.vid) return;
+      const res = `${Math.round(state.vid.w / 8) * 8}x${Math.round(state.vid.h / 4) * 4}`;
+      const sel = [...document.querySelectorAll('#controls select')].find(x => [...x.options].some(o => o.value === '1920x1080'));
+      if (sel && ![...sel.options].some(o => o.value === res)) sel.add(new Option(res.replace('x', '×') + ' (как у видео)', res));
+      set('res', res);
+    }; }
   $('bLfoAll').onclick = () => {
     const lfo = {}; for (const k of LFO_KEYS) lfo[k] = { depth: +(0.12 + Math.random() * 0.28).toFixed(2), period: Math.round(7 + Math.random() * 38), shape: LFO_SHAPES[Math.floor(Math.random() * 3)][0] };
     set('lfo', lfo);
