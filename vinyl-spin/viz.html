@@ -21,6 +21,8 @@
   header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
   header nav { display: flex; gap: 4px; }
   header nav a, header nav b { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-weight: 500; }
+  #bNoFx { align-self: center; padding: 4px 12px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+  #bNoFx.on { background: var(--accent); color: #111; border-color: var(--accent); }
   header nav b { color: #111; background: var(--accent); border-color: var(--accent); }
   .row label span { display: flex; gap: 8px; }
   .lfo { font-weight: 400; color: #5d636b; cursor: pointer; }
@@ -96,7 +98,8 @@
     <header>
       <h1>vinyl-spin</h1>
       <nav><a href="index.html">Пластинка</a><b>Визуализация трека</b></nav>
-      <span>картинка слушает трек: кик, хэты, аккорды, брейки и дропы</span>
+      <button id="bNoFx" title="Выключить вообще все эффекты: в кадре только твоё видео и логотип. Второе нажатие вернёт настройки">Без эффектов</button>
+      <span id="hdrNote">картинка слушает трек: кик, хэты, аккорды, брейки и дропы</span>
     </header>
     <div id="viewport"><canvas id="cv" width="1920" height="1080"></canvas><div class="hint" id="vpHint">Перетащи трек (WAV, AIFF, FLAC или MP3) на поле «Трек» справа.<br>Анализ займёт несколько секунд, потом картинку можно смотреть и рендерить.</div><div id="dropHint">Брось файл на нужное поле справа</div></div>
     <div id="tl" title="Карта трека: секции, громкость полос, удары. Клик — перейти."><canvas id="tlBase"></canvas><canvas id="tlTop"></canvas></div>
@@ -2894,7 +2897,7 @@ async function setFile(kind, file) {
   }
   if (kind === 'video') {
     if (state.vid) { state.vid.el.pause(); URL.revokeObjectURL(state.vid.url); state.vid = null; }
-    if (!file) { drop.classList.remove('has'); drop.querySelector('small').textContent = 'MP4 / MOV / WebM'; syncControls(); redraw(); return; }
+    if (!file) { drop.classList.remove('has'); drop.querySelector('small').textContent = 'MP4 / MOV / WebM'; $('vpHint').hidden = !!state.audioFile; syncControls(); redraw(); return; }
     const url = URL.createObjectURL(file), el = document.createElement('video');
     el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto'; el.src = url;
     await new Promise((ok, fail) => { el.onloadeddata = ok; el.onerror = () => fail(new Error('браузер не открыл это видео (попробуй MP4 H.264)')); });
@@ -2906,6 +2909,7 @@ async function setFile(kind, file) {
       await setFile('audio', file).catch(() => { });
       if (!state.m) { await setFile('audio', null); state.duration = el.duration; $('anStatus').className = 'note'; $('anStatus').textContent = 'В видео нет звука: ролик соберётся без звука по длине видео (или перетащи трек в «Трек»).'; }
     }
+    $('vpHint').hidden = true;
     await vidSeek(clock.t); redraw();
     return;
   }
@@ -3071,6 +3075,17 @@ function initUI() {
     } catch (e) { $('lvStatus').textContent = 'Не получилось включить вход: ' + e.message; }
   };
   $('bOut').onclick = openOutput;
+  // «Без эффектов»: всё, что двигает и портит кадр, — в ноль; видео — целиком, сверху только логотип
+  let fxBackup = null;
+  const NO_FX = { ascii: 0, glitch: 0, ca: 0, fx: 0, grain: 0, bloom: 0, digital: 0, freeze: 0, games: 'off', looks: 'off', lfo: {},
+    kickAmt: 0, hatAmt: 0, stabAmt: 0, flashAmt: 0, vidDis: 0, vidOn: true, vidMode: 'clean' };
+  $('bNoFx').onclick = () => {
+    if (fxBackup) { applyPreset({ params: fxBackup }); fxBackup = null; }
+    else { fxBackup = { ...state.p }; Object.assign(state.p, NO_FX); dirtyMap = true; syncControls(); redraw(); }
+    $('bNoFx').classList.toggle('on', !!fxBackup); $('bNoFx').textContent = fxBackup ? 'Вернуть эффекты' : 'Без эффектов';
+    $('hdrNote').textContent = fxBackup ? (state.vid ? 'эффекты выключены: в кадре только видео и логотип' : 'эффекты выключены — загрузи видео в «Видео», и в кадре будут только оно и логотип')
+      : 'картинка слушает трек: кик, хэты, аккорды, брейки и дропы';
+  };
   // «Разрешение как у видео»: ролик в размере исходника (ширина кратна 8, высота 4 — так требует упаковка кадров)
   { const box = document.querySelector('#controls details[data-vid]'), div = document.createElement('div');
     div.className = 'btns'; div.innerHTML = '<button id="bVidRes" title="Ролик будет того же размера, что и видео">Разрешение как у видео</button>'; box.appendChild(div);
