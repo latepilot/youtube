@@ -32,6 +32,8 @@
   .lfoAll span { color: var(--muted); font-size: 12px; margin-right: 4px; }
   .still { display: inline-flex; gap: 4px; margin-left: 8px; }
   .still select { width: auto; }
+  .lvMeter { height: 6px; background: #22262b; border-radius: 3px; overflow: hidden; margin: 6px 0; }
+  .lvMeter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 60ms linear; }
   .seg { display: flex; gap: 0; margin: 10px 0 6px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { flex: 1; border: 0; border-radius: 0; padding: 8px 6px; font-weight: 600; background: transparent; color: var(--muted); cursor: pointer; }
   .seg button.on { background: var(--accent); color: #111; }
@@ -136,6 +138,15 @@
         <p class="note" id="rWhere"></p>
       </div>
     </details>
+    <details open id="liveBox"><summary>Лайв: вход с аудиоинтерфейса</summary>
+      <div class="row wide"><label>Вход (например, Scarlett 8i6)</label><select id="lvDev"><option value="">по умолчанию</option></select></div>
+      <div class="row wide"><label>Каналы, куда приходит звук</label><select id="lvPair"><option value="0">1–2</option><option value="1">3–4</option><option value="2">5–6</option><option value="3">7–8</option></select></div>
+      <div class="row"><label>Усиление входа для анализа, дБ</label><input type="range" id="lvGain" min="-12" max="24" step="0.5"><input type="number" id="lvGainN" step="0.5"></div>
+      <div class="row"><label>Чувствительность картинки</label><input type="range" id="lvSens" min="0.3" max="2" step="0.01"><input type="number" id="lvSensN" step="0.01"></div>
+      <div class="lvMeter" title="Уровень входа"><i id="lvLvl"></i></div>
+      <div class="btns"><button id="bLive" class="primary">Включить лайв</button><button id="bOut" title="Отдельное окно с картинкой для проектора; двойной клик — во весь экран">Окно вывода</button></div>
+      <p class="note" id="lvStatus">Звук с интерфейса анализируется на лету, все сцены и эффекты реагируют вживую. Трек загружать не нужно.</p>
+    </details>
     <div id="themeSw" class="seg" title="Тема визуала: свой набор сцен, цветов и эффектов"><button data-t="dub">Даб-техно</button><button data-t="ambient">Эмбиент</button></div>
     <div class="btns lfoAll"><span>LFO</span><button id="bLfoAll" title="Каждому силовому параметру — своё случайное медленное колебание">Оживить всё</button><button id="bLfoOff">Снять все</button></div>
     <div id="controls"></div>
@@ -158,7 +169,7 @@
    ========================================================================== */
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  theme: 'dub', lfo: {}, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
+  theme: 'dub', lfo: {}, liveDevice: '', livePair: 0, liveGain: 0, liveSens: 1, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
@@ -843,6 +854,188 @@ function gameState(m, p, t, aspect) {
     out.sp.push([px, y, chomp(age) + (pd < 0 ? 100 : 0), 4]);
   }
   return out;
+}
+
+/* ==========================================================================
+   Лайв: вход с аудиоинтерфейса (например, Digitakt → Scarlett 8i6), анализ на лету и живая карта.
+   Анализатор живёт в AudioWorklet (отдельный аудиопоток, блоки по 128 отсчётов): полосы низ/середина/верх,
+   огибающие каждые 10 мс, атаки с адаптивным порогом. Карта — те же поля, что у разобранного трека,
+   только пополняется по ходу, поэтому все сцены и эффекты работают без изменений.
+   ========================================================================== */
+const LIVE_WORKLET = `
+class Biquad { constructor(t, f, q, sr) { const w = 2 * Math.PI * f / sr, c = Math.cos(w), s = Math.sin(w), a = s / (2 * q); let b0, b1, b2;
+    if (t === 'lp') { b0 = (1 - c) / 2; b1 = 1 - c; b2 = b0; } else { b0 = (1 + c) / 2; b1 = -(1 + c); b2 = b0; }
+    const a0 = 1 + a; this.b = [b0 / a0, b1 / a0, b2 / a0]; this.a = [-2 * c / a0, (1 - a) / a0]; this.x1 = this.x2 = this.y1 = this.y2 = 0; }
+  run(x) { const y = this.b[0] * x + this.b[1] * this.x1 + this.b[2] * this.x2 - this.a[0] * this.y1 - this.a[1] * this.y2; this.x2 = this.x1; this.x1 = x; this.y2 = this.y1; this.y1 = y; return y; } }
+class Onset {
+  // атака: быстрая огибающая выросла относительно своего минимума за последние ~12 мс сильнее адаптивного порога
+  constructor(refr, floor, win) { this.W = win; this.hist = new Float32Array(win); this.h = 0; this.avg = 1e-4; this.peak = 1e-3; this.last = -1; this.refr = refr; this.floor = floor; }
+  step(e, t) {
+    this.hist[this.h = (this.h + 1) % this.W] = e; let mn = 1e9; for (let i = 0; i < this.W; i++) mn = Math.min(mn, this.hist[i]);
+    const rise = e - mn; this.avg += 0.002 * (rise - this.avg); this.peak = Math.max(rise, this.peak * 0.99995); this.rel = rise / this.peak; this.jump = rise / Math.max(e, 1e-6);
+    if (rise > Math.max(this.floor, 4 * this.avg, 0.25 * this.peak) && t - this.last > this.refr) { this.last = t; return Math.min(1.5, rise / (0.6 * this.peak)); }
+    return 0;
+  }
+}
+class LiveAnalyzer extends AudioWorkletProcessor {
+  constructor(o) {
+    super(); const sr = sampleRate, p = o.processorOptions || {};
+    this.pair = p.pair || 0; this.gain = 1;
+    this.lo = [new Biquad('lp', 150, 0.7, sr), new Biquad('lp', 150, 0.7, sr)];
+    this.mid = [new Biquad('hp', 300, 0.7, sr), new Biquad('lp', 2500, 0.7, sr)];
+    this.hi = [new Biquad('hp', 6000, 0.7, sr), new Biquad('hp', 6000, 0.7, sr)];
+    this.e = [0, 0, 0, 0]; this.ef = [0, 0, 0]; this.acc = [0, 0, 0, 0]; this.n = 0; this.ms = 0; this.peakLvl = 0;
+    this.hop = Math.round(sr / 100); this.msHop = Math.round(sr / 1000);
+    // быстрые огибающие для атак: у низа спад длиннее периода бочки (иначе огибающая дрожит вместе с волной)
+    this.aEnv = Math.exp(-1 / (0.012 * sr)); this.aFast = [0.018, 0.005, 0.0015].map(r => Math.exp(-1 / (r * sr)));
+    this.ons = [new Onset(0.11, 0.004, 28), new Onset(0.14, 0.002, 16), new Onset(0.045, 0.0008, 8)];   // кик, аккорд, хэт; окно атаки, мс
+    this.lastKick = -1;
+    this.port.onmessage = (m) => { if ('gain' in m.data) this.gain = m.data.gain; if ('pair' in m.data) this.pair = m.data.pair; };
+  }
+  process(inputs) {
+    const inp = inputs[0]; if (!inp || !inp.length) return true;
+    const L = inp[Math.min(this.pair * 2, inp.length - 1)], R = inp[Math.min(this.pair * 2 + 1, inp.length - 1)] || L, N = L.length, sr = sampleRate;
+    const evs = [];
+    for (let i = 0; i < N; i++) {
+      const x = 0.5 * (L[i] + R[i]) * this.gain, ax = Math.abs(x);
+      const lo = this.lo[1].run(this.lo[0].run(x)), mi = this.mid[1].run(this.mid[0].run(x)), hi = this.hi[1].run(this.hi[0].run(x));
+      const b = [ax, Math.abs(lo), Math.abs(mi), Math.abs(hi)];
+      for (let k = 0; k < 4; k++) { this.e[k] = Math.max(b[k], this.e[k] * this.aEnv); this.acc[k] += this.e[k]; }
+      for (let k = 0; k < 3; k++) this.ef[k] = Math.max(b[k + 1], this.ef[k] * this.aFast[k]);
+      this.peakLvl = Math.max(this.peakLvl, ax);
+      if (++this.ms >= this.msHop) {
+        this.ms = 0; const t = currentTime + i / sr;
+        const ss = this.ons[1].step(this.ef[1], t);
+        // кик — резкий скачок в низу, и низ заметно громче середины (иначе это аккорд, протёкший в низ, или плавный саб)
+        const kk = this.ons[0].step(this.ef[0], t); if (kk && this.ef[0] / (this.ef[1] + 1e-6) > 2.2 && this.ons[0].jump > 0.6) { evs.push(['kick', t, kk]); this.lastKick = t; } if (ss && (t - this.lastKick > 0.02 || ss > 1)) evs.push(['stab', t, ss]);
+        const hh = this.ons[2].step(this.ef[2], t); if (hh && t - this.lastKick > 0.012) evs.push(['hat', t, hh]);
+      }
+      if (++this.n >= this.hop) {
+        this.port.postMessage({ t: currentTime + i / sr, env: this.acc.map(v => v / this.hop), lvl: this.peakLvl });
+        this.acc = [0, 0, 0, 0]; this.n = 0; this.peakLvl = 0;
+      }
+    }
+    for (const e of evs) this.port.postMessage({ ev: e });
+    return true;
+  }
+}
+registerProcessor('live-analyzer', LiveAnalyzer);
+`;
+const LIVE_CAP_SEC = 4 * 3600;
+function liveEvents(cap) { const o = { tb: new Float64Array(cap), sb: new Float32Array(cap), n: 0 }; o.t = o.tb.subarray(0, 0); o.s = o.sb.subarray(0, 0); return o; }
+function livePush(ev, t, s) { if (ev.n >= ev.tb.length || (ev.n && t <= ev.tb[ev.n - 1])) return -1; ev.tb[ev.n] = t; ev.sb[ev.n] = s; ev.n++; ev.t = ev.tb.subarray(0, ev.n); ev.s = ev.sb.subarray(0, ev.n); return ev.n - 1; }
+function createLiveMap() {
+  const n = LIVE_CAP_SEC * AN.MAP, f32 = () => new Float32Array(n), u8 = () => new Uint8Array(n);
+  const seed = crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff;   // у каждого выступления своя случайность
+  const m = { live: true, duration: LIVE_CAP_SEC, beatLen: 0.5, beat0: 0, grid: false, barPhase: 0, trackSeed: seed,
+    env: { full: u8(), low: u8(), mid: u8(), high: u8() }, lowSlow: f32(), fullSlow: f32(), pad: f32(), flowT: f32(),
+    kicks: liveEvents(400000), hats: liveEvents(800000), stabs: liveEvents(400000), bass: liveEvents(1),
+    stabChain: new Int32Array(400000), stabEcho: new Int32Array(400000),
+    sections: [{ t: 0, bar: 0, type: 'intro', kick: false, n: 1, trans: '' }], secT: new Float64Array([0]),
+    fill: -1, peak: [1e-3, 1e-3, 1e-3, 1e-3], slow: { low: 0, full: 0, mid: 0, full2: 0, padPeak: 1e-3, flow: 0 }, kickOn: false, kickSince: 0, chain: -1 };
+  return m;
+}
+// новые 10-мс отсчёты огибающих: нормировка на медленно спадающий пик, медленные огибающие, время течения
+function liveEnv(m, t, env, sens) {
+  const i = Math.round(t * AN.MAP); if (i <= m.fill || i >= m.env.full.length) return;
+  const keys = ['full', 'low', 'mid', 'high'], v = keys.map((k, c) => { m.peak[c] = Math.max(env[c], m.peak[c] * 0.99965); return Math.min(255, Math.round(255 * sens * env[c] / m.peak[c])); });
+  const S = m.slow, a = (tau) => 1 - Math.exp(-1 / (tau * AN.MAP));
+  for (let j = Math.max(0, m.fill + 1); j <= i; j++) {
+    keys.forEach((k, c) => { m.env[k][j] = v[c]; });
+    S.low += a(1.5) * (v[1] / 255 - S.low); S.full += a(3) * (v[0] / 255 - S.full);
+    S.mid += a(2.5) * (v[2] / 255 - S.mid); S.full2 += a(4.5) * (v[0] / 255 - S.full2);
+    const pad = 0.6 * S.mid + 0.4 * S.full2; S.padPeak = Math.max(pad, S.padPeak * 0.99995);
+    m.lowSlow[j] = S.low; m.fullSlow[j] = S.full; m.pad[j] = Math.min(1, pad / (0.95 * S.padPeak));
+    m.flowT[j] = S.flow; S.flow += (0.55 + 0.9 * m.pad[j]) / AN.MAP;
+  }
+  m.fill = i;
+}
+function liveEvent(m, kind, t, s) {
+  if (kind === 'kick') {
+    // темп уже найден: удар в низу далеко от доли — это бас, а не кик
+    if (m.grid) { const ph = (((t - m.beat0) / m.beatLen) % 1 + 1) % 1; if (Math.min(ph, 1 - ph) > 0.12) return; }
+    livePush(m.kicks, t, s);
+  }
+  else if (kind === 'hat') livePush(m.hats, t, s);
+  else if (kind === 'stab') {
+    const i = livePush(m.stabs, t, s); if (i < 0) return;
+    const gap = i ? t - m.stabs.tb[i - 1] : Infinity, prevS = i ? m.stabs.sb[i - 1] : 0;
+    if (gap > 1.3 * m.beatLen || s > prevS * 1.15 + 0.05) m.chain = i;
+    m.stabChain[i] = m.chain; m.stabEcho[i] = i - m.chain;
+  }
+}
+// раз в полсекунды: темп по интервалам между киками за последние 12 с и секции по наличию кика
+function liveStructure(m, now) {
+  const k = m.kicks, from = upper(k.t, now - 12), ts = Array.from(k.t.subarray(from));
+  if (ts.length >= 8) {
+    const score = (bpm) => { const P = 60 / bpm; let s = 0; for (let a = 0; a < ts.length; a++) for (let b = a + 1; b < ts.length && ts[b] - ts[a] < 2.2; b++) { const r = (ts[b] - ts[a]) / P, d = r - Math.round(r); if (Math.round(r) >= 1) s += Math.exp(-d * d / 0.004); } return s; };
+    let best = 0, bpm = 0; for (let x = 90; x <= 180; x += 0.25) { const s = score(x); if (s > best) { best = s; bpm = x; } }
+    if (best > ts.length * 0.8) {
+      const P = 60 / bpm, newLen = m.grid ? m.beatLen + 0.25 * (P - m.beatLen) : P;
+      // фаза: среднее по кругу остатков времён кика по доле
+      let c = 0, s = 0; for (const t of ts) { const a = 2 * Math.PI * (t / newLen); c += Math.cos(a); s += Math.sin(a); }
+      m.beatLen = newLen; m.beat0 = (Math.atan2(s, c) / (2 * Math.PI)) * newLen; m.grid = true;
+    }
+  }
+  const bar = 4 * m.beatLen, on = upper(k.t, now) - upper(k.t, now - 2 * bar) >= 2;
+  if (on !== m.kickOn) { if (!m.kickPending || m.kickPending.on !== on) m.kickPending = { on, t: now }; }
+  else m.kickPending = null;
+  if (m.kickPending && now - m.kickPending.t > (on ? 0.5 : 1.5) * bar) {
+    const cur = m.sections[m.sections.length - 1], st = on ? Math.max(cur.t + 0.01, m.kickPending.t - 0.5 * bar) : m.kickPending.t;
+    const absent = st - (m.kickOffSince ?? st);
+    m.sections.push({ t: st, bar: 0, type: on ? 'groove' : 'break', kick: on, n: m.sections.length + 1, trans: on && absent > 4 * bar ? 'drop' : 'shift' });
+    m.secT = Float64Array.from(m.sections, s => s.t);
+    if (!on) m.kickOffSince = st;
+    m.kickOn = on; m.kickPending = null;
+  }
+}
+const live = { ctx: null, stream: null, node: null, t0: 0, m: null, lvl: 0, timer: null };
+async function liveDevices() {
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  return devs.filter(d => d.kind === 'audioinput');
+}
+async function liveStart() {
+  const p = state.p;
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: p.liveDevice ? { exact: p.liveDevice } : undefined,
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 8 } } });
+  const ctx = new AudioContext({ latencyHint: 'interactive' });
+  // модуль анализатора: blob-ссылка (студия на localhost) или data-ссылка (страница открыта с диска)
+  const url = URL.createObjectURL(new Blob([LIVE_WORKLET], { type: 'text/javascript' }));
+  try { await ctx.audioWorklet.addModule(url); }
+  catch (e) { await ctx.audioWorklet.addModule('data:text/javascript;charset=utf-8,' + encodeURIComponent(LIVE_WORKLET)); }
+  finally { URL.revokeObjectURL(url); }
+  const src = ctx.createMediaStreamSource(stream), chans = stream.getAudioTracks()[0].getSettings().channelCount || 2;
+  const node = new AudioWorkletNode(ctx, 'live-analyzer', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: chans, channelCountMode: 'explicit', channelInterpretation: 'discrete', processorOptions: { pair: p.livePair } });
+  const mute = ctx.createGain(); mute.gain.value = 0;
+  src.connect(node); node.connect(mute); mute.connect(ctx.destination);
+  node.port.postMessage({ gain: Math.pow(10, p.liveGain / 20) });
+  Object.assign(live, { ctx, stream, node, t0: ctx.currentTime, m: createLiveMap(), chans });
+  node.port.onmessage = (e) => {
+    const d = e.data, m = live.m;
+    if (d.ev) { liveEvent(m, d.ev[0], d.ev[1] - live.t0, d.ev[2]); return; }
+    liveEnv(m, d.t - live.t0, d.env, state.p.liveSens); live.lvl = Math.max(d.lvl, live.lvl * 0.9);
+  };
+  live.timer = setInterval(() => liveStructure(live.m, ctx.currentTime - live.t0), 500);
+  state.live = live; state.m = live.m; state.raw = null; dirtyMap = false; $('vpHint').hidden = true;
+  if (state.audioFile) audio.pause();
+  clock.playing = true; $('bPlay').textContent = '❚❚'; loop();
+  return chans;
+}
+function liveStop() {
+  if (!state.live) return;
+  clearInterval(live.timer); live.node.disconnect(); live.stream.getTracks().forEach(t => t.stop()); live.ctx.close();
+  state.live = null; state.m = null; clock.playing = false; $('bPlay').textContent = '▶'; $('vpHint').hidden = !!state.audioFile;
+  if (state.audioFile) { dirtyMap = true; analyzeFile(state.audioFile); } else { drawTimelineBase(); redraw(); }
+}
+// окно вывода: картинка студии на отдельном экране (проектор), двойной клик — во весь экран
+function openOutput() {
+  const w = window.open('', 'vs-output', 'width=960,height=540');
+  if (!w) { alert('Браузер не дал открыть окно — разреши всплывающие окна для этой страницы.'); return; }
+  w.document.title = 'vinyl-spin — вывод';
+  w.document.body.innerHTML = '<video autoplay muted playsinline style="position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000;cursor:none"></video>';
+  w.document.body.style.cssText = 'margin:0;background:#000';
+  const v = w.document.querySelector('video'); v.srcObject = cv.captureStream(60);
+  v.ondblclick = () => (w.document.fullscreenElement ? w.document.exitFullscreen() : v.requestFullscreen());
 }
 
 /* ==========================================================================
@@ -2103,7 +2296,7 @@ function outSize() {
   return k === 1 ? { W, H } : { W: Math.round(W * k / 8) * 8, H: Math.round(H * k / 4) * 4 };
 }
 function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
-function durationOf() { return state.duration || (state.m ? state.m.duration : 60); }
+function durationOf() { if (state.live) return LIVE_CAP_SEC; return state.duration || (state.m ? state.m.duration : 60); }
 function frameIndex(t) { return Math.floor(t * state.p.fps + 1e-6); }
 let dirtyMap = true;
 function ensureMap() { if (state.raw && (dirtyMap || !state.m)) { state.m = prepareMap(state.raw, state.p); dirtyMap = false; } }
@@ -2150,7 +2343,7 @@ function styleSegments(m) {
   const key = [p.theme, scSel, p.seed, p.styleMin, p.styleMax, p.bpmFix, p.gridShiftMs].join('|');
   if (m.segCache && m.segCache.key === key) return m.segCache;
   const lo = Math.max(0.5, Math.min(p.styleMin, p.styleMax)), hi = Math.max(lo, p.styleMin, p.styleMax);
-  const snap = (x) => m.grid ? m.beat0 + Math.round((x - m.beat0) / m.beatLen) * m.beatLen : x;
+  const snap = (x) => m.grid && !m.live ? m.beat0 + Math.round((x - m.beat0) / m.beatLen) * m.beatLen : x;
   const drops = m.sections.filter(s => s.trans === 'drop').map(s => s.t);
   const t = [], s = [];
   const nS = amb ? AMB_SCENE_NAMES.length : 4;
@@ -2310,7 +2503,7 @@ function frameState(t) {
   // волна: громкость полос вокруг «сейчас»
   const wv = new Uint8Array(WAVE_COLS * 4), keys = ['full', 'low', 'mid', 'high'];
   for (let i = 0; i < WAVE_COLS; i++) {
-    const tt = ts + (i / (WAVE_COLS - 1) - 0.5) * WAVE_SPAN;
+    const tt = m.live ? ts - (1 - i / (WAVE_COLS - 1)) * WAVE_SPAN : ts + (i / (WAVE_COLS - 1) - 0.5) * WAVE_SPAN;   // в лайве будущего нет — окно в прошлое
     if (tt < 0 || tt > m.duration) continue;
     for (let c = 0; c < 4; c++) wv[i * 4 + c] = Math.round(sample(m.env[keys[c]], tt));
   }
@@ -2484,6 +2677,7 @@ let audioUrl = null;
 const controls = {};
 
 function currentT() {
+  if (state.live) return state.live.ctx.currentTime - state.live.t0;
   if (!clock.playing) return clock.t;
   const now = performance.now();
   if (state.audioFile && clock.audioOk) {
@@ -2495,6 +2689,7 @@ function currentT() {
   return clock.t0 + (now - clock.wall0) / 1000;
 }
 function setT(t) {
+  if (state.live) return;
   const T = durationOf(); t = Math.min(Math.max(0, t), T);
   clock.t = t; clock.t0 = t; clock.wall0 = performance.now();
   if (state.audioFile) audio.currentTime = t;
@@ -2502,6 +2697,7 @@ function setT(t) {
 }
 function play(on) {
   if (!state.m) return;
+  if (state.live) { clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶'; if (on) loop(); else redraw(); return; }
   if (!on && clock.playing) clock.t = currentT();
   clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶';
   if (on) {
@@ -2529,6 +2725,12 @@ function redraw() {
     $('stSec').textContent = `секция: ${({ intro: 'интро', groove: 'грув', break: 'брейк', outro: 'аутро' })[st.sec.type] || st.sec.type}${st.sec.n ? ' ' + st.sec.n : ''} · сцена: ${[...SCENE_NAMES, ...AMB_SCENE_NAMES][st.U.uSceneA]}`;
   }
   drawTimelineTop(t);
+  if (state.live) {
+    const m = state.live.m, lv = Math.min(1, state.live.lvl * Math.pow(10, state.p.liveGain / 20));
+    $('lvLvl').style.width = (100 * Math.sqrt(lv)).toFixed(0) + '%';
+    $('lvLvl').style.background = lv > 0.95 ? '#ff5a4a' : '';
+    if (!(fpsCount % 15)) $('lvStatus').textContent = `Слушаю: ${m.grid ? (60 / m.beatLen).toFixed(1) + ' BPM' : 'темп ищется (нужен кик)'} · киков ${m.kicks.n}, аккордов ${m.stabs.n}, хэтов ${m.hats.n} · ${({ intro: 'интро', groove: 'грув', break: 'брейк' })[m.sections[m.sections.length - 1].type]}`;
+  }
 }
 function loop() {
   if (!clock.playing) return;
@@ -2542,6 +2744,7 @@ function loop() {
 // ---------- карта трека под картинкой ----------
 const TL_COL = { intro: '#3b4a5a', groove: '#3f5e3a', break: '#5a4632', outro: '#4a3b5a' };
 function drawTimelineBase() {
+  if (state.live) return;
   const box = $('tl'), cb = $('tlBase'), ct = $('tlTop'), dpr = window.devicePixelRatio || 1;
   const w = Math.max(10, Math.round(box.clientWidth * dpr)), h = Math.round(box.clientHeight * dpr);
   for (const c of [cb, ct]) { c.width = w; c.height = h; }
@@ -2570,6 +2773,7 @@ function drawTimelineBase() {
   g.fillText('кик', 2 * dpr, 70 * dpr); g.fillText('аккорды', 2 * dpr, 90 * dpr); g.fillText('хэты', 2 * dpr, 108 * dpr);
 }
 function drawTimelineTop(t) {
+  if (state.live) return;
   const ct = $('tlTop'), g = ct.getContext('2d'); g.clearRect(0, 0, ct.width, ct.height);
   if (!state.m) return;
   const x = t / state.m.duration * ct.width;
@@ -2827,6 +3031,28 @@ function initUI() {
   $('presetIn').onchange = (e) => { const f = e.target.files[0]; if (f) f.text().then(t => applyPreset(JSON.parse(t))).catch(err => alert('Не читается пресет: ' + err.message)); e.target.value = ''; };
   $('bReset').onclick = () => { if (confirm('Вернуть все параметры по умолчанию?')) applyPreset({ params: themeDefaults(state.p.theme) }); };
   document.querySelectorAll('#themeSw button').forEach(b => b.onclick = () => setTheme(b.dataset.t));
+  // ---- лайв ----
+  const fillDevs = async () => { try { const ds = await liveDevices(), sel = $('lvDev');
+    sel.innerHTML = '<option value="">по умолчанию</option>' + ds.map(d => `<option value="${d.deviceId}">${d.label || 'вход ' + d.deviceId.slice(0, 6)}</option>`).join('');
+    sel.value = ds.some(d => d.deviceId === state.p.liveDevice) ? state.p.liveDevice : ''; } catch (e) { } };
+  fillDevs();
+  const syncLive = () => { $('lvPair').value = state.p.livePair; $('lvGain').value = $('lvGainN').value = state.p.liveGain; $('lvSens').value = $('lvSensN').value = state.p.liveSens; };
+  syncLive();
+  $('lvDev').onchange = () => { state.p.liveDevice = $('lvDev').value; if (state.live) { liveStop(); $('bLive').click(); } };
+  $('lvPair').onchange = () => { state.p.livePair = +$('lvPair').value; state.live?.node.port.postMessage({ pair: state.p.livePair }); };
+  const setGain = (v) => { state.p.liveGain = +v; syncLive(); state.live?.node.port.postMessage({ gain: Math.pow(10, state.p.liveGain / 20) }); };
+  $('lvGain').oninput = () => setGain($('lvGain').value); $('lvGainN').onchange = () => setGain($('lvGainN').value);
+  const setSens = (v) => { state.p.liveSens = +v; syncLive(); };
+  $('lvSens').oninput = () => setSens($('lvSens').value); $('lvSensN').onchange = () => setSens($('lvSensN').value);
+  $('bLive').onclick = async () => {
+    if (state.live) { liveStop(); $('bLive').textContent = 'Включить лайв'; $('lvStatus').textContent = 'Лайв выключен.'; return; }
+    try {
+      const chans = await liveStart(); fillDevs();
+      $('bLive').textContent = 'Выключить лайв';
+      $('lvStatus').textContent = `Слушаю вход: каналов ${chans}.` + (chans <= 2 && state.p.livePair > 0 ? ' Браузер видит только 1–2 — подай звук в эти входы или перекинь в Focusrite Control.' : '');
+    } catch (e) { $('lvStatus').textContent = 'Не получилось включить вход: ' + e.message; }
+  };
+  $('bOut').onclick = openOutput;
   $('bLfoAll').onclick = () => {
     const lfo = {}; for (const k of LFO_KEYS) lfo[k] = { depth: +(0.12 + Math.random() * 0.28).toFixed(2), period: Math.round(7 + Math.random() * 38), shape: LFO_SHAPES[Math.floor(Math.random() * 3)][0] };
     set('lfo', lfo);
