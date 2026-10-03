@@ -22,7 +22,6 @@
   header nav { display: flex; gap: 4px; }
   header nav a, header nav b { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-weight: 500; }
   #bNoFx { align-self: center; padding: 4px 12px; border-radius: 6px; font-weight: 600; cursor: pointer; }
-  #bNoFx.on { background: var(--accent); color: #111; border-color: var(--accent); }
   header nav b { color: #111; background: var(--accent); border-color: var(--accent); }
   .row label span { display: flex; gap: 8px; }
   .lfo { font-weight: 400; color: #5d636b; cursor: pointer; }
@@ -36,6 +35,7 @@
   .still select { width: auto; }
   .lvMeter { height: 6px; background: #22262b; border-radius: 3px; overflow: hidden; margin: 6px 0; }
   .lvMeter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 60ms linear; }
+  .trimNote { color: #f5c518; font-size: 12px; margin-left: 8px; }
   .seg { display: flex; gap: 0; margin: 10px 0 6px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { flex: 1; border: 0; border-radius: 0; padding: 8px 6px; font-weight: 600; background: transparent; color: var(--muted); cursor: pointer; }
   .seg button.on { background: var(--accent); color: #111; }
@@ -98,7 +98,7 @@
     <header>
       <h1>vinyl-spin</h1>
       <nav><a href="index.html">Пластинка</a><b>Визуализация трека</b></nav>
-      <button id="bNoFx" title="Выключить вообще все эффекты: в кадре только твоё видео и логотип. Второе нажатие вернёт настройки">Без эффектов</button>
+      <button id="bNoFx" title="Все эффекты в ноль: кадр перестаёт двигаться и портиться. Дальше добавляй нужное ползунками. Видео, логотип, тема, разрешение не трогаются">Сбросить эффекты</button>
       <span id="hdrNote">картинка слушает трек: кик, хэты, аккорды, брейки и дропы</span>
     </header>
     <div id="viewport"><canvas id="cv" width="1920" height="1080"></canvas><div class="hint" id="vpHint">Перетащи трек (WAV, AIFF, FLAC или MP3) на поле «Трек» справа.<br>Анализ займёт несколько секунд, потом картинку можно смотреть и рендерить.</div><div id="dropHint">Брось файл на нужное поле справа</div></div>
@@ -112,7 +112,7 @@
       <button id="bFwd" title="+10 с (Shift+→)">+10с</button>
       <button id="bNextSec" title="К следующей секции (Page Down)">⇥ секция</button>
       <input id="seekbar" type="range" min="0" max="1" step="0.000001" value="0">
-      <span id="time"></span>
+      <span id="time"></span><span id="trimNote" class="trimNote" title="Двойной клик по таймлайну — убрать обрезку"></span>
       <label class="check" title="Превью в половинном разрешении, если не хватает скорости. PNG и рендер всегда в полном."><input type="checkbox" id="halfRes"> превью ½</label>
       <span class="still"><button id="bStill" title="Сохранить текущий кадр (на паузе) в большом разрешении, без логотипа и зерна. Клавиша S">Снимок</button><select id="stillMP" title="Размер снимка"><option value="12">12 МП</option><option value="20" selected>20 МП</option><option value="33">33 МП (8K)</option><option value="50">50 МП</option></select></span>
     </div>
@@ -172,7 +172,7 @@
    ========================================================================== */
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  theme: 'dub', lfo: {}, vidMode: 'fx', liveDevice: '', livePair: 0, liveGain: 0, liveSens: 1, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
+  theme: 'dub', lfo: {}, cam: 1, scan: 1, vidFit: 'cover', trimIn: 0, trimOut: 0, liveDevice: '', livePair: 0, liveGain: 0, liveSens: 1, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
@@ -196,7 +196,7 @@ const themeDefaults = (th) => ({ ...VDEF, ...THEME_PRESET[th] || {}, theme: th }
 // LFO: у каждого «силового» параметра может быть своё медленное колебание вокруг значения ползунка.
 // Глубина — доля диапазона ползунка (±половина), период в секундах, форма: синус, треугольник, плавный случайный.
 // Не модулируются параметры, которые задают структуру (смены сцен, события, seed, рендер): иначе кадр «прыгал» бы.
-const LFO_KEYS = new Set(['vidDis', 'vidCell', 'vidPix', 'grain', 'ascii', 'glitch', 'fx', 'ca', 'bloom', 'digital', 'vhs', 'riso', 'xerox', 'brutal', 'misreg', 'kickAmt', 'hatAmt', 'stabAmt', 'flashAmt', 'blk']);
+const LFO_KEYS = new Set(['cam', 'scan', 'vidDis', 'vidCell', 'vidPix', 'grain', 'ascii', 'glitch', 'fx', 'ca', 'bloom', 'digital', 'vhs', 'riso', 'xerox', 'brutal', 'misreg', 'kickAmt', 'hatAmt', 'stabAmt', 'flashAmt', 'blk']);
 const LFO_SHAPES = [['sine', 'синус'], ['tri', 'треугольник'], ['random', 'плавный случайный']];
 function lfoWave(key, l, t, seed) {
   const kh = [...key].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261) >>> 0;
@@ -245,6 +245,8 @@ const SCHEMA = [
     { key: 'gold', th: 'dub', label: 'Золотой (линии в «кольцах»)', type: 'color' },
     { key: 'blk', th: 'dub', label: 'Размер «пикселя» пятен, px при 1080p', min: 4, max: 40, step: 0.5 },
     { key: 'grain', label: 'Зерно', min: 0, max: 0.2, step: 0.001 },
+    { key: 'cam', label: 'Движение кадра: дыхание, наклон, жизнь элементов', min: 0, max: 2, step: 0.01 },
+    { key: 'scan', label: 'Развёртка (тонкие строки)', min: 0, max: 3, step: 0.01 },
     { key: 'ascii', label: 'ASCII: сколько кадра пересобирать символами', min: 0, max: 1, step: 0.01 },
     { key: 'glitch', label: 'Глитч: сдвиги строк и блоков, шлейфы, инверсия', min: 0, max: 2, step: 0.01 },
     { key: 'fx', label: 'Эффекты стиля: зеркало, дизеринг, растр, волна строк', min: 0, max: 1, step: 0.01 },
@@ -255,7 +257,7 @@ const SCHEMA = [
   ]},
   { title: 'Своё видео', open: true, vidOnly: true, items: [
     { key: 'vidOn', label: 'Показывать видео вместо сцен', type: 'check' },
-    { key: 'vidMode', label: 'Что делать с видео', type: 'select', options: [['fx', 'эффекты и расщепление'], ['clean', 'только видео и логотип (без эффектов)']] },
+    { key: 'vidFit', label: 'Как вписать видео', type: 'select', options: [['cover', 'заполнить кадр (края обрезаются)'], ['contain', 'целиком (поля по краям)']] },
     { key: 'vidDis', label: 'Расщепление: сколько кадра уходит в пиксели и символы', min: 0, max: 1, step: 0.01 },
     { key: 'vidCell', label: 'Размер символа, px при 1080p', min: 5, max: 40, step: 0.5 },
     { key: 'vidPix', label: 'Размер пикселя, px при 1080p', min: 4, max: 64, step: 1 },
@@ -1119,7 +1121,7 @@ uniform vec4 uKicks[6]; uniform int uKickN;    // возраст, сила, seed
 uniform vec4 uStabs[12]; uniform int uStabN;   // возраст, сила, номер эха, seed
 uniform vec4 uPads[8]; uniform int uPadN;     // долгие события для эмбиента (до 16 с): возраст, сила, seed
 uniform float uPad, uFlowT;
-uniform sampler2D uVideo; uniform vec2 uVidRes; uniform int uPlain;   // uPlain: видео как есть, целиком, без эффектов               // своё видео (сцена 11)
+uniform sampler2D uVideo; uniform vec2 uVidRes; uniform int uVidFit; uniform float uCam;   // uVidFit: 1 — видео целиком; uCam — сила движения кадра               // своё видео (сцена 11)
 uniform vec4 uGeo[48]; uniform vec4 uGeoP, uGeoS, uGeoR, uGeoX; uniform int uGeoBoth;   // геометрия (см. geoShape)                    // медленная огибающая пэда/хвоста и время течения (интеграл скорости)
 uniform vec4 uHats[4]; uniform int uHatN;      // возраст, сила, номер, -
 uniform sampler2D uWave;                       // 256 колонок вокруг «сейчас»: r — вся громкость, g — низ, b — середина, a — верх
@@ -1594,9 +1596,10 @@ vec3 sceneGeo(vec2 p, vec4 sd){
 
 // своё видео: кадр заполняет экран (лишнее обрезается по краям), дышит вместе с кадром
 vec3 sceneVideo(vec2 p){
-  float A = uRes.x / uRes.y, V = uVidRes.x / max(uVidRes.y, 1.0), s = V > A ? 1.0 : A / V;
+  float A = uRes.x / uRes.y, V = uVidRes.x / max(uVidRes.y, 1.0), s = uVidFit == 1 ? (V > A ? A / V : 1.0) : (V > A ? 1.0 : A / V);
   vec2 uv = vec2(p.x / (V * s), -p.y / s) + 0.5;
-  return texture(uVideo, clamp(uv, 0.0, 1.0)).rgb;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec3(0.0);   // поля, когда видео вписано целиком
+  return texture(uVideo, uv).rgb;
 }
 vec3 scene(int id, vec2 p, vec4 sd){ return id == 0 ? sceneTrio(p, sd) : id == 1 ? sceneSheet(p, sd) : id == 2 ? sceneRings(p, sd) : id == 3 ? sceneField(p, sd)
   : id == 4 ? sceneMyc(p, sd) : id == 6 ? sceneTopo(p, sd) : id == 7 ? sceneNebula(p, sd) : id == 11 ? sceneVideo(p) : sceneGeo(p, sd); }
@@ -1627,17 +1630,10 @@ vec3 details(vec3 c, vec2 p){
 void main(){
   PX = 1.0 / uRes.y; LW = max(0.55 * PX, 0.75 / 1080.0);
   vec2 p0 = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
-  if (uPlain == 1) {
-    // видео целиком (вписано, поля чёрные), без зума, дыхания и деталей
-    float A = uRes.x / uRes.y, V = uVidRes.x / max(uVidRes.y, 1.0), s = V > A ? A / V : 1.0;
-    vec2 uv = vec2(p0.x / (V * s), -p0.y / s) + 0.5;
-    o = vec4(any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) ? vec3(0.0) : texture(uVideo, uv).rgb, 1.0);
-    return;
-  }
   // кадр дышит: медленный зум и крен от низов, толчок на кик
-  float zoom = 1.0 + 0.025 * uLowSlow + 0.018 * min(uKick, 1.0) * uKickAmt + 0.012 * sin(uTime * 0.11);
-  float rot = 0.012 * sin(uTime * 0.07) + 0.004 * uSpring * uKickAmt;
-  vec2 p = mat2(cos(rot), sin(rot), -sin(rot), cos(rot)) * p0 / zoom + vec2(0.006 * sin(uTime * 0.13), 0.004 * cos(uTime * 0.09));
+  float zoom = 1.0 + uCam * (0.025 * uLowSlow + 0.018 * min(uKick, 1.0) * uKickAmt + 0.012 * sin(uTime * 0.11));
+  float rot = uCam * (0.012 * sin(uTime * 0.07) + 0.004 * uSpring * uKickAmt);
+  vec2 p = mat2(cos(rot), sin(rot), -sin(rot), cos(rot)) * p0 / zoom + uCam * vec2(0.006 * sin(uTime * 0.13), 0.004 * cos(uTime * 0.09));
   vec3 c;
   // морфинг: у каждой сцены три опорных элемента (левый прибор, центр, правый). Элементы обеих сцен
   // сводятся в общие точки M (позиция и размер плавно идут от сцены A к B), поворачиваются и перетекают.
@@ -1646,7 +1642,7 @@ void main(){
   vec2 M[3]; float sM[3];
   for (int i = 0; i < 3; i++) {
     vec3 a = ANC[uSceneA * 3 + i], b = ANC[uSceneB * 3 + i];
-    M[i] = mix(a.xy, b.xy, e) + life(i); sM[i] = mix(a.z, b.z, e) * breath(i);
+    M[i] = mix(a.xy, b.xy, e) + life(i) * uCam; sM[i] = mix(a.z, b.z, e) * mix(1.0, breath(i), min(uCam, 1.0));
   }
   vec2 pa = featWarp(p, uSceneA, M, sM, uSpin * e);
   vec2 pb = featWarp(p, uSceneB, M, sM, -uSpin * (1.0 - e));
@@ -2034,7 +2030,7 @@ const FS_FINAL = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 uRes; uniform sampler2D uSrc;
 uniform vec4 uLook;
-uniform float uTime, uHigh, uLow, uTrack, uRoll, uGrain, uDig, uMosh, uMoshAge, uBloom, uTone, uClean;
+uniform float uTime, uHigh, uLow, uTrack, uRoll, uGrain, uDig, uMosh, uMoshAge, uBloom, uTone, uClean, uScan;
 uniform uint uFrame, uSeed, uLayoutSeed, uDigSeed, uMoshSeed;
 uniform sampler2D uLogo; uniform vec4 uLogoRect; uniform int uHasLogo; uniform float uLogoOpacity;
 out vec4 o;
@@ -2122,7 +2118,7 @@ void main(){
     col += g / 8.0 * uBloom * 1.6 * (1.0 - 0.9 * uTone);   // на светлой бумаге почти не светит
   }
   // развёртка (без виньетки: никакого затемнения по краям)
-  col *= 1.0 - 0.03 * step(0.5, fract(frag.y / (3.0 * u1))) * (1.0 - uClean);   // на снимке развёртки нет
+  col *= 1.0 - 0.03 * uScan * step(0.5, fract(frag.y / (3.0 * u1))) * (1.0 - uClean);   // на снимке развёртки нет
   vec2 pix = vec2(frag.x, uRes.y - frag.y);
   float l = lum(col);
   if (uGrain > 0.0) col += uGrain * (0.55 + 0.9 * l * (1.0 - l)) * gauss(ivec2(floor(pix / max(1.0, H / 1080.0 * 1.4))), uFrame);
@@ -2160,7 +2156,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uVidCol: 'i', uVidRes: '2', uPlain: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uVidCol: 'i', uVidRes: '2', uVidFit: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -2309,6 +2305,9 @@ function outSize() {
   return k === 1 ? { W, H } : { W: Math.round(W * k / 8) * 8, H: Math.round(H * k / 4) * 4 };
 }
 function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
+// обрезка (как в QuickTime): кусок [trimIn, trimOut]; trimOut = 0 — до конца
+function trimRange() { const T = durationOf(), a = Math.min(Math.max(0, state.p.trimIn || 0), T), b = state.p.trimOut > 0 ? Math.min(state.p.trimOut, T) : T; return b - a > 0.04 ? [a, b] : [0, T]; }
+function trimmed() { const [a, b] = trimRange(); return a > 0 || b < durationOf() - 1e-6; }
 function durationOf() { if (state.live) return LIVE_CAP_SEC; return state.duration || (state.m ? state.m.duration : 60); }
 function frameIndex(t) { return Math.floor(t * state.p.fps + 1e-6); }
 let dirtyMap = true;
@@ -2403,14 +2402,10 @@ function visTime(m, p, ts) {
   for (const [a, b, loop] of ev) if (ts >= a && ts < b) return loop ? a + ((ts - a) % loop) : a;
   return ts;
 }
-// «только видео и логотип»: всё, что рисуют эффекты, выключено; видео целиком, без зерна и развёртки
-const CLEAN_U = { uPlain: 1, uVid: 0, uAscii: 0, uGlitch: 0, uCA: 0, uFx: [0, 0, 0, 0], uSmear: 0, uInvert: 0, uLook: [0, 0, 0, 0], uDig: 0, uMosh: 0,
-  uTrack: 0, uRoll: 0, uBloom: 0, uGrain: 0, uClean: 1, uGameOn: 0, uFlash: 0, uMix: 0 };
-const cleanVideo = () => !!(state.vid && state.p.vidOn && state.p.vidMode === 'clean');
 function frameState(t) {
   ensureMap();
   const m = state.m, p = modParams(state.p, t + state.p.syncMs / 1000);   // значения с LFO в этот момент
-  const ts = m && !cleanVideo() ? visTime(m, p, t + p.syncMs / 1000) : t + p.syncMs / 1000;
+  const ts = m ? visTime(m, p, t + p.syncMs / 1000) : t + p.syncMs / 1000;
   const U = { uMix: 0, uSceneA: 0, uSceneB: 0, uSeedA: [0.3, 0.5, 0.7, 1], uSeedB: [0.3, 0.5, 0.7, 1],
     uKick: 0, uSpring: 0, uHat: 0, uLow: 0, uMid: 0, uHigh: 0, uLowSlow: 0, uStab: 0, uTension: 0, uFlash: 0, uBeat: 0, uTime: ts % 1000,
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
@@ -2418,7 +2413,7 @@ function frameState(t) {
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
     uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uLook: [0, 0, 0, 0], uLayoutSeed: 1, uTrack: 0, uRoll: 0, uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
-  if (!m) { if (state.vid && p.vidOn) Object.assign(U, { uSceneA: 11, uSceneB: 11, uVidRes: [state.vid.w, state.vid.h], uVid: Math.max(0.001, p.vidDis), uVidCell: p.vidCell, uVidPix: p.vidPix, uVidCol: { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0, uVidFlow: p.vidFlow, uVidReact: p.vidReact, uBgA: [0, 0, 0], uBgB: [0, 0, 0] }); if (cleanVideo()) Object.assign(U, CLEAN_U); return st; }
+  if (!m) { if (state.vid && p.vidOn) Object.assign(U, { uSceneA: 11, uSceneB: 11, uVidRes: [state.vid.w, state.vid.h], uVid: Math.max(0.001, p.vidDis), uVidCell: p.vidCell, uVidPix: p.vidPix, uVidCol: { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0, uVidFlow: p.vidFlow, uVidReact: p.vidReact, uBgA: [0, 0, 0], uBgB: [0, 0, 0], uCam: p.cam, uScan: p.scan, uVidFit: p.vidFit === 'contain' ? 1 : 0 }); if (!(p.vidDis > 0)) U.uVid = 0; return st; }
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
   // стили перетекают: на границе отрезка (каждые styleMin–styleMax с) — к случайной другой сцене
   const segs = styleSegments(m);
@@ -2442,6 +2437,7 @@ function frameState(t) {
   const BG = [[0.065, 0.066, 0.054], [0.885, 0.876, 0.862], [0.07, 0.064, 0.036], [0.925, 0.925, 0.918]];
   // эмбиент: фон — из органической схемы, «рябь» — тёплая бумага
   const amb = ambPaletteAt(ts);
+  U.uCam = p.cam; U.uScan = p.scan; U.uVidFit = p.vidFit === 'contain' ? 1 : 0;
   U.uTheme = p.theme === 'ambient' ? 1 : 0; U.uAmbBg = amb[0]; U.uFlow = p.flow; U.uBloom = p.bloom * (0.75 + 0.6 * sample(m.pad, ts));   // на пэдах свечение разливается шире
   U.uAmbPaper = [0, 1, 2].map(i => 0.94 * [1, 0.965, 0.89][i] * 0.88 + amb[3][i] * 0.12);
   const bgOf = (k) => k < 4 ? BG[k] : k === 6 ? U.uAmbPaper : amb[0];
@@ -2503,7 +2499,7 @@ function frameState(t) {
   // своё видео: вместо сцен — кадр видео, тёмный фон, без переходов между сценами
   if (state.vid && p.vidOn) {
     U.uSceneA = U.uSceneB = 11; U.uMix = 0; U.uTone = 0; U.uBgA = U.uBgB = [0, 0, 0];
-    U.uVidRes = [state.vid.w, state.vid.h]; U.uVid = Math.max(0.001, p.vidDis); U.uVidCell = p.vidCell; U.uVidPix = p.vidPix;
+    U.uVidRes = [state.vid.w, state.vid.h]; U.uVid = p.vidDis > 0 ? p.vidDis : 0;   // ноль — никакого расщепления U.uVidCell = p.vidCell; U.uVidPix = p.vidPix;
     U.uVidCol = { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0; U.uVidFlow = p.vidFlow; U.uVidReact = p.vidReact;
   } else U.uVid = 0;
   U.uGeoBoth = 0;
@@ -2525,7 +2521,6 @@ function frameState(t) {
     for (let c = 0; c < 4; c++) wv[i * 4 + c] = Math.round(sample(m.env[keys[c]], tt));
   }
   st.wave = wv; st.sec = sec; st.si = si;
-  if (cleanVideo()) Object.assign(U, CLEAN_U);
   return st;
 }
 
@@ -2713,8 +2708,14 @@ function setT(t) {
   if (state.audioFile) audio.currentTime = t;
   redraw();
 }
+function updateTrimNote() {
+  const el = $('trimNote'); if (!el) return;
+  const [a, b] = trimRange(); el.textContent = trimmed() ? `обрезка ${fmt(a)} – ${fmt(b)} (${fmt(b - a)})` : '';
+  const opt = $('rRange').querySelector('option[value="all"]'); if (opt) opt.textContent = trimmed() ? 'обрезанный кусок' : 'весь трек';
+}
 function play(on) {
   if (!state.m && !state.vid) return;
+  if (on && !state.live && trimmed()) { const [a, b] = trimRange(); if (clock.t < a || clock.t >= b - 0.02) setT(a); }
   if (state.live) { clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶'; if (on) loop(); else redraw(); return; }
   if (!on && clock.playing) clock.t = currentT();
   clock.playing = on; $('bPlay').textContent = on ? '❚❚' : '▶';
@@ -2737,6 +2738,7 @@ function redraw() {
   const st = seek(t);
   $('seekbar').max = T; $('seekbar').value = t;
   $('time').innerHTML = `<b>${fmt(t)}</b> / ${fmt(T)}`;
+  updateTrimNote();
   if (state.m && st.sec) {
     const m = state.m, beatPos = (st.ts - m.beat0) / m.beatLen;
     $('stBeat').textContent = m.grid ? `${(60 / m.beatLen).toFixed(2)} BPM · такт ${Math.floor((Math.floor(beatPos) - m.barPhase) / 4) + 1}` : 'без сетки';
@@ -2752,7 +2754,7 @@ function redraw() {
 }
 function loop() {
   if (!clock.playing) return;
-  if (currentT() >= durationOf()) { clock.t = durationOf(); play(false); return; }
+  if (!state.live && currentT() >= trimRange()[1]) { play(false); setT(trimRange()[1]); return; }   // доиграли до конца куска — курсор ровно на конце
   redraw();
   fpsCount++; const now = performance.now();
   if (now - fpsT > 1000) { $('stFps').textContent = `превью ${(fpsCount * 1000 / (now - fpsT)).toFixed(0)} fps`; fpsCount = 0; fpsT = now; }
@@ -2767,7 +2769,7 @@ function drawTimelineBase() {
   const w = Math.max(10, Math.round(box.clientWidth * dpr)), h = Math.round(box.clientHeight * dpr);
   for (const c of [cb, ct]) { c.width = w; c.height = h; }
   const g = cb.getContext('2d'); g.clearRect(0, 0, w, h);
-  const m = state.m; if (!m) return;
+  const m = state.m; if (!m) { drawTimelineTop(currentT()); return; }
   const T = m.duration, X = (t) => t / T * w;
   // секции
   m.sections.forEach((s, i) => {
@@ -2793,9 +2795,17 @@ function drawTimelineBase() {
 function drawTimelineTop(t) {
   if (state.live) return;
   const ct = $('tlTop'), g = ct.getContext('2d'); g.clearRect(0, 0, ct.width, ct.height);
-  if (!state.m) return;
-  const x = t / state.m.duration * ct.width;
-  g.fillStyle = '#ff6b6b'; g.fillRect(Math.round(x), 0, 2, ct.height);
+  if (!state.m && !state.vid) return;
+  const T = durationOf(), W = ct.width, H = ct.height, dpr = window.devicePixelRatio || 1, X = (v) => v / T * W;
+  // обрезка: снаружи затемнено, кусок — в жёлтой рамке с ручками, как в QuickTime
+  const [a, b] = trimRange(), xa = X(a), xb = X(b), hw = 7 * dpr, bar = 3 * dpr;
+  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(0, 0, xa, H); g.fillRect(xb, 0, W - xb, H);
+  g.fillStyle = '#f5c518'; g.fillRect(xa, 0, xb - xa, bar); g.fillRect(xa, H - bar, xb - xa, bar);
+  g.fillRect(xa, 0, hw, H); g.fillRect(xb - hw, 0, hw, H);
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  for (const x0 of [xa + hw / 2, xb - hw / 2]) for (const dy of [-6, 0, 6]) g.fillRect(x0 - 1.5 * dpr, H / 2 + dy * dpr - 1 * dpr, 3 * dpr, 2 * dpr);
+  const x = X(t);
+  g.fillStyle = '#ff6b6b'; g.fillRect(Math.round(x), 0, 2, H);
 }
 
 // ---------- панель ----------
@@ -2968,8 +2978,9 @@ async function renderVideo() {
   }
   if (state.audioFile) state.duration = studio.upload.T;
   const T = durationOf(), total = Math.ceil(T * fps - 1e-9), range = $('rRange').value;
-  const start = range === 'here' ? Math.min(total - 1, frameIndex(clock.t)) : 0;
-  const count = range === 'all' ? total : Math.min(20 * fps, total - start);
+  const [ta, tb] = trimRange(), tStart = Math.round(ta * fps), tEnd = Math.min(total, Math.round(tb * fps));
+  const start = range === 'here' ? Math.min(total - 1, frameIndex(clock.t)) : range === 'all' ? tStart : 0;
+  const count = range === 'all' ? tEnd - tStart : Math.min(20 * fps, total - start);
   const bitrate = Math.round(p.bitrate * 1e6), gop = Math.max(1, Math.round(p.gopSec * fps));
   const sup = await VZ.h264Support(W, H, fps, bitrate);
   const job = await postJSON('/api/job', { audioId: studio.upload.id || undefined, W, H, fps, bitrate, gop, encoder: sup.supported ? 'webcodecs' : 'raw', codec: sup.codec,
@@ -3033,8 +3044,28 @@ function initUI() {
   $('bNextF').onclick = () => { play(false); setT((frameIndex(clock.t) + 1) / state.p.fps); };
   $('bNextSec').onclick = () => { if (!state.m) return; const i = upper(state.m.secT, currentT() + state.p.syncMs / 1000 + 0.01); if (i < state.m.sections.length) setT(state.m.sections[i].t - 2 * state.m.beatLen); };
   $('seekbar').oninput = (e) => setT(+e.target.value);
-  const tlSeek = (e) => { if (!state.m) return; const r = $('tl').getBoundingClientRect(); setT((e.clientX - r.left) / r.width * state.m.duration); };
-  $('tl').onmousedown = (e) => { tlSeek(e); const mv = (ev) => tlSeek(ev), up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); };
+  const tlTime = (e) => { const r = $('tl').getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * durationOf(); };
+  const tlSeek = (e) => { if (!state.m && !state.vid) return; setT(tlTime(e)); };
+  const snapF = (v) => Math.round(v * state.p.fps) / state.p.fps;
+  const setTrim = (which, v) => {
+    const T = durationOf(), [a, b] = trimRange(), gap = 1 / state.p.fps;
+    if (which === 'in') state.p.trimIn = Math.min(snapF(v), b - gap);
+    else { const o = Math.max(snapF(v), a + gap); state.p.trimOut = o >= T - 1e-6 ? 0 : o; }
+    if (state.p.trimIn <= 0) state.p.trimIn = 0;
+    updateTrimNote(); drawTimelineTop(currentT());
+  };
+  $('tl').onmousedown = (e) => {
+    if (state.live || (!state.m && !state.vid)) return;
+    const r = $('tl').getBoundingClientRect(), [a, b] = trimRange(), T = durationOf(), px = (v) => r.left + v / T * r.width;
+    // за жёлтую ручку — двигаем начало или конец куска (кадр под ручкой показывается), иначе — перемотка
+    const near = (v) => Math.abs(e.clientX - px(v)) < 12;
+    const which = near(a) && near(b) ? (e.clientX < px(a) + 6 ? 'in' : 'out') : near(a) ? 'in' : near(b) ? 'out' : null;
+    const act = which ? (ev) => { const v = tlTime(ev); setTrim(which, v); setT(Math.min(Math.max(v, trimRange()[0]), trimRange()[1])); } : tlSeek;
+    act(e); const mv = (ev) => act(ev), up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  };
+  $('tl').ondblclick = () => { state.p.trimIn = 0; state.p.trimOut = 0; updateTrimNote(); drawTimelineTop(currentT()); };
+  window.__setTrim = setTrim;
   audio.onended = () => play(false);
   window.addEventListener('resize', () => { drawTimelineBase(); drawTimelineTop(currentT()); });
   window.addEventListener('keydown', (e) => {
@@ -3045,6 +3076,8 @@ function initUI() {
     else if (e.code === 'Home') setT(0);
     else if (e.code === 'PageDown') $('bNextSec').click();
     else if (e.code === 'KeyS' && !e.metaKey && !e.ctrlKey) $('bStill').click();
+    else if (e.code === 'KeyI' && !e.metaKey && !e.ctrlKey) window.__setTrim('in', currentT());
+    else if (e.code === 'KeyO' && !e.metaKey && !e.ctrlKey) window.__setTrim('out', currentT());
   });
   $('bStill').onclick = () => saveStill(Number($('stillMP').value));
   $('halfRes').onchange = (e) => { state.previewScale = e.target.checked ? 0.5 : 1; redraw(); };
@@ -3075,17 +3108,11 @@ function initUI() {
     } catch (e) { $('lvStatus').textContent = 'Не получилось включить вход: ' + e.message; }
   };
   $('bOut').onclick = openOutput;
-  // «Без эффектов»: всё, что двигает и портит кадр, — в ноль; видео — целиком, сверху только логотип
-  let fxBackup = null;
-  const NO_FX = { ascii: 0, glitch: 0, ca: 0, fx: 0, grain: 0, bloom: 0, digital: 0, freeze: 0, games: 'off', looks: 'off', lfo: {},
-    kickAmt: 0, hatAmt: 0, stabAmt: 0, flashAmt: 0, vidDis: 0, vidOn: true, vidMode: 'clean' };
-  $('bNoFx').onclick = () => {
-    if (fxBackup) { applyPreset({ params: fxBackup }); fxBackup = null; }
-    else { fxBackup = { ...state.p }; Object.assign(state.p, NO_FX); dirtyMap = true; syncControls(); redraw(); }
-    $('bNoFx').classList.toggle('on', !!fxBackup); $('bNoFx').textContent = fxBackup ? 'Вернуть эффекты' : 'Без эффектов';
-    $('hdrNote').textContent = fxBackup ? (state.vid ? 'эффекты выключены: в кадре только видео и логотип' : 'эффекты выключены — загрузи видео в «Видео», и в кадре будут только оно и логотип')
-      : 'картинка слушает трек: кик, хэты, аккорды, брейки и дропы';
-  };
+  // «Сбросить эффекты»: всё, что двигает и портит кадр, — в ноль; дальше нужное добавляется ползунками
+  const NO_FX = { ascii: 0, glitch: 0, ca: 0, fx: 0, grain: 0, bloom: 0, cam: 0, scan: 0, digital: 0, freeze: 0, games: 'off', looks: 'off', lfo: {},
+    kickAmt: 0, hatAmt: 0, stabAmt: 0, flashAmt: 0, vidDis: 0 };
+  $('bNoFx').onclick = () => { Object.assign(state.p, NO_FX); dirtyMap = true; syncControls(); redraw();
+    $('hdrNote').textContent = 'эффекты сброшены в ноль — добавляй нужное ползунками справа'; };
   // «Разрешение как у видео»: ролик в размере исходника (ширина кратна 8, высота 4 — так требует упаковка кадров)
   { const box = document.querySelector('#controls details[data-vid]'), div = document.createElement('div');
     div.className = 'btns'; div.innerHTML = '<button id="bVidRes" title="Ролик будет того же размера, что и видео">Разрешение как у видео</button>'; box.appendChild(div);
