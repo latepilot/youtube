@@ -940,7 +940,15 @@ async function detectStudio() {
   if (!location.protocol.startsWith('http')) return;
   try { const r = await fetch('/api/ping'); studio.info = await r.json(); } catch { return; }
   $('rNoStudio').hidden = true; $('rStudio').hidden = false;
-  $('rWhere').textContent = `Ролики сохраняются в ${studio.info.outDir}. ${studio.info.ffmpeg}`;
+  // куда сохранять: путь и кнопка выбора папки (окно Finder); выбор запоминается студией
+  const showWhere = () => {
+    const box = $('rWhere'); box.textContent = 'Сохраняю в: ';
+    const b = document.createElement('b'); b.textContent = studio.info.outDir; box.appendChild(b); box.append(' ');
+    const btn = document.createElement('button'); btn.textContent = 'Выбрать папку…'; btn.title = 'Откроется окно Finder; выбор запомнится';
+    btn.onclick = async () => { btn.disabled = true; try { const j = await (await fetch('/api/outdir/choose', { method: 'POST' })).json(); if (j.outDir) studio.info.outDir = j.outDir; if (j.error) alert(j.error); } catch (e) { alert('Не получилось: ' + e.message); } showWhere(); };
+    box.appendChild(btn); const ff = document.createElement('div'); ff.textContent = studio.info.ffmpeg; box.appendChild(ff);
+  };
+  showWhere();
   $('bRender').onclick = () => renderVideo().catch(e => { rStatus('Ошибка: ' + e.message, 'warn'); });
   $('bCancel').onclick = async () => { studio.cancel = true; if (studio.jobId) await fetch(`/api/job/${studio.jobId}/cancel`, { method: 'POST' }).catch(() => { }); };
   $('bReveal').onclick = () => studio.lastJob && fetch(`/api/job/${studio.lastJob}/reveal`, { method: 'POST' });

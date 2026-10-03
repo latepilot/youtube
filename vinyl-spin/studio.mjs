@@ -18,7 +18,11 @@ const NO_OPEN = argv.includes('--no-open');
 // версия кода сервера: если на порту висит старая копия (запущена до git pull), новая её сменит
 const VERSION = crypto.createHash('sha1').update(fs.readFileSync(fileURLToPath(import.meta.url))).update(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib.mjs'))).digest('hex').slice(0, 12);
 const PORT = Number(process.env.VS_PORT) || 8420;
-const OUT_DIR = process.env.VS_OUT || path.join(os.homedir(), 'Movies', 'vinyl-spin');
+// куда сохранять ролики: выбор пользователя запоминается в ~/.vinyl-spin.json, по умолчанию — рабочий стол
+const CONFIG = path.join(os.homedir(), '.vinyl-spin.json');
+const readConfig = () => { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')); } catch { return {}; } };
+let OUT_DIR = process.env.VS_OUT || readConfig().outDir || path.join(os.homedir(), 'Desktop');
+if (!process.env.VS_OUT && !fs.existsSync(OUT_DIR)) OUT_DIR = path.join(os.homedir(), 'Desktop');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vinyl-spin-'));
 const log = (...m) => console.log(new Date().toTimeString().slice(0, 8), ...m);
 
@@ -67,6 +71,18 @@ async function handle(req, res) {
     fs.createReadStream(path.join(HERE, p === '/viz.html' ? 'viz.html' : 'index.html')).pipe(res); return;
   }
   if (req.method === 'GET' && p === '/api/ping') return json(res, 200, { ok: true, version: VERSION, ffmpeg: ffver, platform: process.platform, outDir: OUT_DIR });
+  // выбор папки: родное окно Finder «Выбрать папку» (только на Маке); выбор запоминается
+  if (req.method === 'POST' && p === '/api/outdir/choose') {
+    if (process.platform !== 'darwin') return json(res, 400, { error: 'выбор папки окном есть только на Маке' });
+    const script = `POSIX path of (choose folder with prompt "Куда сохранять ролики vinyl-spin" default location (POSIX file "${OUT_DIR.replace(/"/g, '')}"))`;
+    const r = await new Promise(ok => { const pr = spawn('osascript', ['-e', script]); let out = '', err = ''; pr.stdout.on('data', d => out += d); pr.stderr.on('data', d => err += d); pr.on('close', code => ok({ code, out: out.trim(), err })); });
+    if (r.code !== 0 || !r.out) return json(res, 200, { cancelled: true, outDir: OUT_DIR });
+    const dir = r.out.replace(/\/$/, '') || '/';
+    try { fs.accessSync(dir, fs.constants.W_OK); } catch { return json(res, 400, { error: 'в эту папку нельзя записывать', outDir: OUT_DIR }); }
+    OUT_DIR = dir; fs.writeFileSync(CONFIG, JSON.stringify({ ...readConfig(), outDir: dir }, null, 1));
+    log(`ролики теперь сохраняются в ${dir}`);
+    return json(res, 200, { outDir: dir });
+  }
   if (req.method === 'POST' && p === '/api/quit') {
     if (jobs.size) return json(res, 409, { error: 'идёт рендер' });
     json(res, 200, { ok: true }); log('остановлен: запущена новая версия'); setTimeout(cleanup, 100); return;
