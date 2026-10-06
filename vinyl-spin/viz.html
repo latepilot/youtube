@@ -172,7 +172,7 @@
    ========================================================================== */
 const VDEF = Object.freeze({
   res: '1920x1080', fps: 25,
-  theme: 'dub', lfo: {}, cam: 1, scan: 1, vidFit: 'cover', trimIn: 0, trimOut: 0, liveDevice: '', livePair: 0, liveGain: 0, liveSens: 1, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
+  theme: 'dub', lfo: {}, vsMode: 'auto', vsyn: 1, vsKey: 0.45, vsInv: false, vsBg: 'auto', vsFill: 'auto', vsColor: 'auto', vsStripe: 6, vsWater: 1, vsShadow: 1, vsEcho: 1, vsTear: 1, vsSmear: 1, cam: 1, scan: 1, vidFit: 'cover', trimIn: 0, trimOut: 0, liveDevice: '', livePair: 0, liveGain: 0, liveSens: 1, vidOn: true, vidDis: 0.6, vidCell: 12, vidPix: 18, vidCol: 'video', vidFlow: 1, vidReact: 1, vidSpeed: 1, vidOffset: 0, scenes: 'auto', ambScenes: 'auto', ambPal: 'drift', bloom: 0, flow: 1, seed: 1,
   blue: '#2f5bff', red: '#ff4a1c', gold: '#d9b483',
   blk: 13, grain: 0.05, ascii: 0.5, glitch: 1, ca: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, fx: 1,
   palMode: 'drift', palSec: 20,
@@ -187,16 +187,16 @@ const SCENE_NAMES = ['три прибора (тёмная)', 'лист с вол
 const AMB_SCENE_NAMES = ['мицелий', 'цветок жизни и семена', 'рябь на воде (светлая)', 'туманность и светило', 'лотос', 'метатронов куб', 'торовое поле'];
 // темы: при переключении эти параметры принимают значения темы (потом их можно крутить)
 const THEME_PRESET = {
-  dub: { ascii: 0.5, glitch: 1, ca: 1, fx: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, palSec: 20, digital: 0.8, freeze: 1, games: 'normal', looks: 'auto', grain: 0.05, bloom: 0,
+  dub: { vsMode: 'auto', ascii: 0.5, glitch: 1, ca: 1, fx: 1, styleMin: 3, styleMax: 6, morphSec: 2.5, palSec: 20, digital: 0.8, freeze: 1, games: 'normal', looks: 'auto', grain: 0.05, bloom: 0,
     lfo: { ascii: { depth: 0.35, period: 23, shape: 'random' }, glitch: { depth: 0.25, period: 17, shape: 'random' }, ca: { depth: 0.25, period: 11, shape: 'sine' }, fx: { depth: 0.3, period: 29, shape: 'random' }, grain: { depth: 0.15, period: 13, shape: 'tri' } } },
-  ambient: { ascii: 0, glitch: 0, ca: 0.35, fx: 0.35, styleMin: 12, styleMax: 24, morphSec: 6, palSec: 45, digital: 0, freeze: 0, games: 'off', looks: 'off', grain: 0.04, bloom: 0.7,
+  ambient: { vsMode: 'off', ascii: 0, glitch: 0, ca: 0.35, fx: 0.35, styleMin: 12, styleMax: 24, morphSec: 6, palSec: 45, digital: 0, freeze: 0, games: 'off', looks: 'off', grain: 0.04, bloom: 0.7,
     lfo: { bloom: { depth: 0.3, period: 31, shape: 'random' }, ca: { depth: 0.2, period: 19, shape: 'sine' }, grain: { depth: 0.2, period: 23, shape: 'random' }, fx: { depth: 0.25, period: 41, shape: 'random' } } },
 };
 const themeDefaults = (th) => ({ ...VDEF, ...THEME_PRESET[th] || {}, theme: th });
 // LFO: у каждого «силового» параметра может быть своё медленное колебание вокруг значения ползунка.
 // Глубина — доля диапазона ползунка (±половина), период в секундах, форма: синус, треугольник, плавный случайный.
 // Не модулируются параметры, которые задают структуру (смены сцен, события, seed, рендер): иначе кадр «прыгал» бы.
-const LFO_KEYS = new Set(['cam', 'scan', 'vidDis', 'vidCell', 'vidPix', 'grain', 'ascii', 'glitch', 'fx', 'ca', 'bloom', 'digital', 'vhs', 'riso', 'xerox', 'brutal', 'misreg', 'kickAmt', 'hatAmt', 'stabAmt', 'flashAmt', 'blk']);
+const LFO_KEYS = new Set(['vsyn', 'vsKey', 'vsStripe', 'vsWater', 'vsShadow', 'vsEcho', 'vsTear', 'vsSmear', 'cam', 'scan', 'vidDis', 'vidCell', 'vidPix', 'grain', 'ascii', 'glitch', 'fx', 'ca', 'bloom', 'digital', 'vhs', 'riso', 'xerox', 'brutal', 'misreg', 'kickAmt', 'hatAmt', 'stabAmt', 'flashAmt', 'blk']);
 const LFO_SHAPES = [['sine', 'синус'], ['tri', 'треугольник'], ['random', 'плавный случайный']];
 function lfoWave(key, l, t, seed) {
   const kh = [...key].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261) >>> 0;
@@ -266,6 +266,21 @@ const SCHEMA = [
     { key: 'vidReact', label: 'Реакция на трек (кик, верха)', min: 0, max: 2, step: 0.01 },
     { key: 'vidSpeed', label: 'Скорость видео', min: 0.25, max: 2, step: 0.01 },
     { key: 'vidOffset', label: 'Сдвиг видео относительно трека, с', min: -60, max: 60, step: 0.04 },
+  ]},
+  { title: 'Видеосинт (видеосинтезатор 80-х)', open: true, items: [
+    { key: 'vsMode', label: 'Как включается', type: 'select', options: [['auto', 'у части отрезков стиля, с разными фонами и заливками'], ['always', 'всё время'], ['off', 'выключить']] },
+    { key: 'vsyn', label: 'Сила', min: 0, max: 1, step: 0.01 },
+    { key: 'vsKey', label: 'Порог кея (что считать силуэтом)', min: 0.05, max: 0.95, step: 0.01 },
+    { key: 'vsInv', label: 'Силуэт — тёмное, а не светлое', type: 'check' },
+    { key: 'vsBg', label: 'Фон', type: 'select', options: [['auto', 'случайно по отрезкам'], ['0', 'полосы и «вязка»'], ['1', 'радужные полосы'], ['2', 'снег'], ['3', 'лабиринт'], ['4', 'тёмный']] },
+    { key: 'vsFill', label: 'Заливка силуэта', type: 'select', options: [['auto', 'случайно по отрезкам'], ['0', 'плоская светлая'], ['1', 'галька (рельеф)'], ['2', 'искры'], ['3', 'тёмная']] },
+    { key: 'vsColor', label: 'Цвет заливки и шлейфов', type: 'select', options: [['auto', 'случайно по отрезкам'], ['mono', 'чёрно-белый'], ['color', 'цветной']] },
+    { key: 'vsStripe', label: 'Шаг полос, px при 1080p', min: 2, max: 24, step: 0.5 },
+    { key: 'vsWater', label: 'Вода: изгиб полос от яркости и баса', min: 0, max: 3, step: 0.01 },
+    { key: 'vsShadow', label: 'Тень-задержка (толкается киком)', min: 0, max: 3, step: 0.01 },
+    { key: 'vsEcho', label: 'Эхо-силуэт (ярче на аккордах)', min: 0, max: 2, step: 0.01 },
+    { key: 'vsTear', label: 'Срывы строк и полоса трекинга', min: 0, max: 3, step: 0.01 },
+    { key: 'vsSmear', label: 'Цветные шлейфы от краёв', min: 0, max: 3, step: 0.01 },
   ]},
   { title: 'Цифровые глитчи 90-х и аркада', open: true, items: [
     { key: 'digital', label: 'Битые MPEG-блоки, датамош, артефакты сжатия', min: 0, max: 1.5, step: 0.01 },
@@ -1759,6 +1774,93 @@ vec3 vidSplit(vec2 frag, vec2 sp, vec3 orig, float u1){
   vec3 bg = c3 * 0.07;
   return mix(bg, vidInk(c3, L), glyphAt(gi, inC) * fade);
 }
+// ---- Видеосинт (аналоговый видеосинтезатор 80-х): люма-кей силуэта, генератор полос на фоне, тень-задержка,
+// эхо-призрак, срывы строк, цветные шлейфы, полоса трекинга. Фон: 0 полосы и «вязка», 1 радужные полосы,
+// 2 снег, 3 лабиринт, 4 тёмный с редкими штрихами. Заливка: 0 плоская, 1 галька, 2 искры, 3 тёмная.
+uniform float uVs, uVsKey, uVsStripe, uVsWater, uVsShadow, uVsEcho, uVsTear, uVsSmear, uStab, uLowSlow, uHat;
+uniform int uVsBg, uVsFill, uVsCol, uVsInv;
+vec3 vsHue(float h){ return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+float vsKeyAt(vec2 f, float u1){
+  vec2 P = vec2(3.0 * u1), c = floor(f / P), cc = (c + 0.5) * P, o = vec2(5.0 * u1);
+  // яркость чуть размыта: силуэт — цельное пятно, а не мелкие детали кадра
+  float l = 0.4 * lum(tap(cc)) + 0.15 * (lum(tap(cc + o)) + lum(tap(cc - o)) + lum(tap(cc + vec2(o.x, -o.y))) + lum(tap(cc - vec2(o.x, -o.y))));
+  float k = step(uVsKey + (h2(c, 301u) - 0.5) * 0.14, l);          // рваный край: порог дрожит по клеткам
+  return uVsInv == 1 ? 1.0 - k : k;
+}
+vec3 vsBack(vec2 frag, vec2 f, float l, float u1, int B){
+  float t = uTime, H = uRes.y; vec2 g = frag / u1; float per = uVsStripe;
+  float wob = uVsWater * (0.4 + 0.9 * uLowSlow) * (sin(g.y * 0.05 + t * 1.3 + l * 6.0) * 2.0 * (0.3 + l) + l * per * 1.6);   // изгиб — в основном у ярких мест
+  if (B == 2) { float v = h2(floor(frag / (3.0 * u1)), uFrame / 2u + 401u); return vec3(0.62 + 0.38 * v) * (0.9 + 0.1 * vn2(frag / (40.0 * u1))); }
+  if (B == 3) {                                                       // лабиринт: штрихи по диагоналям клеток (трюше)
+    vec2 c = floor(g / 7.0), q = fract(g / 7.0); float o = step(0.5, h2(c, 403u + uFrame / 6u));
+    float d = abs(o > 0.5 ? q.x - q.y : q.x + q.y - 1.0);
+    return vec3(0.82 - 0.6 * (1.0 - smoothstep(0.05, 0.16, d)) * (0.6 + 0.4 * h2(c, 405u)));
+  }
+  if (B == 4) return vec3(0.03 + 0.07 * step(0.93, h2(vec2(floor(g.x / 3.0), floor(g.y / 50.0 + t)), 407u)));
+  // полосы: слева вертикальные, справа «вязка» (горизонтальный муар); граница плывёт
+  float right = step(0.55 + 0.12 * sin(frag.y / H * 7.0 + t * 0.3), frag.x / uRes.x);
+  float sv = 0.5 + 0.5 * sin(6.2832 * (g.x + wob) / per);
+  float knit = 0.5 + 0.5 * sin(6.2832 * (g.x + wob + 0.5 * per * mod(floor(g.y / 2.0), 2.0)) / per) * sin(6.2832 * (g.y + wob * 0.3) / (per * 0.7));
+  float s = mix(sv, knit, right);
+  if (B == 1) {                                                       // радужные: колоризатор по положению и яркости
+    vec3 h = vsHue(fract(g.x / (per * 7.0) + l * 0.6 + t * 0.04 + right * 0.3));
+    return h * (0.35 + 0.75 * s) * (0.85 + 0.15 * step(0.5, fract(g.y / 3.0)));
+  }
+  return vec3(0.12 + 0.75 * s);
+}
+vec3 vsFillCol(vec2 frag, vec2 f, float u1, int F, float lit){
+  vec2 g = frag / u1;
+  float n = vn2(g / 5.0 + vec2(0.0, uTime * 0.6)), nb = vn2(g / 5.0 + vec2(0.35, 0.35 + uTime * 0.6));
+  float bump = n - nb;                                                // «рельеф» шума: светлая и тёмная сторона камушка
+  vec3 hc = uVsCol == 1 ? vsHue(fract(h2(floor(g / 5.0), 409u) + uTime * 0.05)) : vec3(1.0);
+  if (F == 1) return clamp(vec3(0.5 + 2.2 * bump) * mix(vec3(1.0), hc, 0.55) * lit + 0.1, 0.0, 1.0);
+  if (F == 2) { float sp = step(0.72, n) * step(0.6, h2(floor(g / 2.0), 411u + uFrame / 3u)); return mix(vec3(0.04), hc * 0.95 + 0.05, sp * lit); }
+  if (F == 3) return vec3(0.07);
+  float dash = step(0.993, h2(floor(g / vec2(7.0, 2.0)), 413u));      // плоская: редкие чёрточки
+  return vec3(0.93 - 0.5 * dash) * lit;
+}
+vec3 vsynth(vec2 frag, vec2 sp, vec3 orig, float u1){
+  float t = uTime, H = uRes.y, kick = min(uKick, 1.0) * uKickAmt;
+  // срывы строк: полосы уезжают влево, на кик чаще
+  vec2 f = sp;
+  float tear = uVsTear * (0.3 + 1.2 * kick);
+  float bh = (4.0 + 26.0 * h2(vec2(floor(frag.y / (36.0 * u1)), 5.0), uGlitchSeed)) * u1, band = floor(frag.y / bh);
+  if (h2(vec2(band, 7.0), uGlitchSeed) < 0.1 * tear) f.x -= (20.0 + 140.0 * h2(vec2(band, 8.0), uGlitchSeed)) * u1 * tear;
+  float l = lum(tap(f)), k = vsKeyAt(f, u1), row = floor(frag.y / (2.0 * u1));
+  // тень: тот же кей, задержанный вправо, с хвостами строк
+  float sh = uVsShadow * (1.0 + 0.8 * kick) * H * 0.06;
+  float ks = max(vsKeyAt(f - vec2(sh, 0.0), u1), vsKeyAt(f - vec2(sh * (1.0 + 0.8 * h2(vec2(row, 11.0), uSeed)), 0.0), u1) * step(0.55, h2(vec2(row, 12.0), uSeed)));
+  // эхо: второй силуэт дальше вправо, дрейфует и рвётся по строкам; ярче на аккордах
+  float eA = clamp(uVsEcho * (0.3 + 0.9 * min(uStab, 1.2)), 0.0, 1.0);
+  vec2 eo = vec2(H * (0.2 + 0.05 * sin(t * 0.4)), H * 0.025 * sin(t * 0.27));
+  float tornE = (h2(vec2(floor(frag.y / (5.0 * u1)), floor(t * 12.5)), 313u) - 0.5) * 36.0 * u1;
+  float ke = eA > 0.01 ? vsKeyAt(f - eo - vec2(tornE, 0.0), u1) : 0.0;
+  // фон; сверху иногда полоса другого фона
+  int B = uVsBg;
+  float topBand = step(frag.y, H * 0.18) * step(0.5, h2(vec2(floor(t * 0.5), 15.0), uSeed + 417u));
+  vec3 bg = vsBack(frag, f, l, u1, topBand > 0.5 ? (B == 1 ? 0 : 1) : B);
+  vec3 c = bg;
+  c = mix(c, vec3(0.03), ks * (1.0 - k));
+  c = mix(c, vsFillCol(frag, f, u1, uVsFill, 0.85), ke * eA * (1.0 - k) * (1.0 - ks * 0.5));
+  c = mix(c, vsFillCol(frag, f, u1, uVsFill, 1.0), k);
+  // цветные шлейфы: от правого края силуэта по строке тянутся полосы цвета
+  if (uVsSmear > 0.01 && k < 0.5) {
+    float L = uVsSmear * H * (0.05 + 0.18 * h2(vec2(row, 21.0 + floor(t * 4.0)), uSeed));
+    for (int i = 1; i <= 6; i++) {
+      float d = L * float(i) / 6.0;
+      if (vsKeyAt(f - vec2(d, 0.0), u1) > 0.5) {
+        vec3 hc = uVsCol == 1 || B == 1 ? vsHue(fract(row * 0.037 + t * 0.2)) : vec3(0.9);
+        c = mix(c, hc, (1.0 - float(i - 1) / 6.0) * 0.75 * step(0.35, h2(vec2(row, 23.0), uSeed)));
+        break;
+      }
+    }
+  }
+  // полоса трекинга: яркая шумная линия поперёк кадра
+  float ty = fract(t * 0.061 + h2(vec2(3.0), uSeed)) * H;
+  if (abs(frag.y - ty) < 5.0 * u1 && h2(vec2(floor(t * 1.5), 31.0), uSeed) < 0.35 * uVsTear + 0.15 * kick)
+    c = vec3(0.75 + 0.25 * h2(floor(frag / (2.0 * u1)), uFrame + 433u));
+  return mix(orig, c, clamp(uVs, 0.0, 1.0));
+}
 void main(){
   vec2 frag = gl_FragCoord.xy;
   float H = uRes.y, u1 = H / 1080.0;
@@ -1778,6 +1880,7 @@ void main(){
   float ca = (uCA * (1.0 + 0.8 * min(uKick, 1.0) * uKickAmt) + 0.008 * g) * H;
   vec3 col = vec3(tap(sp + dir * ca).r, tap(sp).g, tap(sp - dir * ca).b);
   if (uVid > 0.001) col = vidSplit(frag, sp, col, u1);           // своё видео: расщепление на пиксели и ASCII
+  if (uVs > 0.001) col = vsynth(frag, sp, col, u1);              // видеосинт
   // размазывание (как сортировка пикселей): на аккордах в отдельных полосах яркое тянется шлейфом вправо
   if (uSmear > 0.01) {
     float row = floor(frag.y / (14.0 * u1));
@@ -2156,7 +2259,7 @@ void main(){
 }`;
 
 const UT = { uSceneA: 'i', uSceneB: 'i', uKickN: 'i', uStabN: 'i', uHatN: 'i', uHasLogo: 'i', uFrame: 'u', uSeed: 'u', uGlitchSeed: 'u', uAsciiSeed: 'u',
-  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uVidCol: 'i', uVidRes: '2', uVidFit: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
+  uSeedA: '4', uSeedB: '4', uLogoRect: '4', uKicks: '4', uStabs: '4', uHats: '4', uPads: '4', uPadN: 'i', uGeo: '4', uGeoP: '4', uGeoS: '4', uGeoR: '4', uGeoX: '4', uGeoBoth: 'i', uVidCol: 'i', uVidRes: '2', uVidFit: 'i', uVsBg: 'i', uVsFill: 'i', uVsCol: 'i', uVsInv: 'i', uBlue: '3', uRed: '3', uGold: '3', uBgA: '3', uBgB: '3', uAMode: '4', uFx: '4', uTrans: 'i', uSpin: '3', uLook: '4', uTheme: 'i', uAmbBg: '3', uAmbPaper: '3', uInk1: '3', uInk2: '3', uInk3: '3', uRisoScreen: 'i', uLayoutSeed: 'u', uSp: '4', uSpN: 'i', uInv: '4', uPac: '4', uPow: '2', uAlive: 'I', uGameCol: 'i', uDigSeed: 'u', uMoshSeed: 'u' };
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -2370,6 +2473,7 @@ function styleSegments(m) {
     t.push(tt); s.push({ scene: base + scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], fx: fxSet[Math.floor(r(8) * fxSet.length)], trans: isDrop ? 'drop' : 'shift',
       // тип перехода в этот отрезок: 0 — морфинг элементов, 1 — пролёт сквозь центр (и всегда на дропе), 2 — жидкость
       look: LOOKS[Math.floor(r(13) * LOOKS.length)], layout: Math.floor(r(14) * 1e6),
+      vs: { on: r(15) < (amb ? 0.15 : 0.35) ? 1 : 0, bg: Math.floor(r(16) * 5), fill: Math.floor(r(17) * 4), col: r(18) < 0.5 ? 1 : 0 },
       kind: amb ? [0, 2, 2, 1, 0, 2][Math.floor(r(9) * 6)] : isDrop ? 1 : [0, 0, 0, 1, 2, 2][Math.floor(r(9) * 6)], spin: [0, 1, 2].map(q => (r(10 + q) - 0.5) * 1.6) });
     let next = Math.max(snap(tt + lo + r(7) * (hi - lo)), tt + 0.5 * lo);
     const d = drops.find(d => d > tt + 0.25 && d < next + 0.25 * lo);   // дроп рядом — меняемся ровно на нём
@@ -2411,7 +2515,7 @@ function frameState(t) {
     uBlk: p.blk / 1080, uKickAmt: p.kickAmt, uStabAmt: p.stabAmt, uHatAmt: p.hatAmt,
     uKicks: new Float32Array(24), uStabs: new Float32Array(48), uHats: new Float32Array(16), uKickN: 0, uStabN: 0, uHatN: 0,
     uBlue: hexToRgb(p.blue), uRed: hexToRgb(p.red), uGold: hexToRgb(p.gold), uGrain: p.grain, uFrame: frameIndex(t), uSeed: p.seed,
-    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uLook: [0, 0, 0, 0], uLayoutSeed: 1, uTrack: 0, uRoll: 0, uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
+    uHasLogo: 0, uLogoRect: [0, 0, 1, 1], uLogoOpacity: p.logoOpacity, uTone: 0, uBar: 0, uAscii: 0, uAMode: [1, 0, 0, 0], uFx: [0, 0, 0, 0], uVs: 0, uLook: [0, 0, 0, 0], uLayoutSeed: 1, uTrack: 0, uRoll: 0, uTrans: 0, uSpin: [0, 0, 0], uSmear: 0, uInvert: 0, uAsciiSeed: 1, uGlitch: 0, uGlitchSeed: 1, uCA: 0.0015 * p.ca };
   const st = { U, ts };
   if (!m) { if (state.vid && p.vidOn) Object.assign(U, { uSceneA: 11, uSceneB: 11, uVidRes: [state.vid.w, state.vid.h], uVid: Math.max(0.001, p.vidDis), uVidCell: p.vidCell, uVidPix: p.vidPix, uVidCol: { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0, uVidFlow: p.vidFlow, uVidReact: p.vidReact, uBgA: [0, 0, 0], uBgB: [0, 0, 0], uCam: p.cam, uScan: p.scan, uVidFit: p.vidFit === 'contain' ? 1 : 0 }); if (!(p.vidDis > 0)) U.uVid = 0; return st; }
   const si = sectionIndex(m, ts), sec = m.sections[si], prev = m.sections[si - 1];
@@ -2430,6 +2534,14 @@ function frameState(t) {
   const amt = [p.vhs, p.riso, p.xerox, p.brutal];
   U.uLook = p.looks === 'off' ? [0, 0, 0, 0] : p.looks === 'manual' ? amt : segs.s[from].look.map((a, i) => (a * (1 - U.uMix) + segs.s[to].look[i] * U.uMix) * amt[i]);
   U.uLayoutSeed = segs.s[U.uMix < 0.5 ? from : to].layout >>> 0;
+  // видеосинт: сила по режиму; фон, заливка и цвет — из настроек или случайные у отрезка
+  { const vA = segs.s[from].vs, vB = segs.s[to].vs, vs = U.uMix < 0.5 ? vA : vB;
+    U.uVs = p.vsMode === 'off' ? 0 : p.vsMode === 'always' ? p.vsyn : (vA.on * (1 - U.uMix) + vB.on * U.uMix) * p.vsyn;
+    U.uVsBg = p.vsBg === 'auto' ? vs.bg : +p.vsBg; U.uVsFill = p.vsFill === 'auto' ? vs.fill : +p.vsFill;
+    U.uVsCol = p.vsColor === 'auto' ? vs.col : p.vsColor === 'color' ? 1 : 0;
+    Object.assign(U, { uVsKey: p.vsKey, uVsStripe: p.vsStripe, uVsWater: p.vsWater, uVsShadow: p.vsShadow, uVsEcho: p.vsEcho, uVsTear: p.vsTear, uVsSmear: p.vsSmear });
+    // светлые сцены: «силуэт» — тёмное (чернила на бумаге), если не перевёрнуто вручную
+    U.uVsInv = (p.vsInv ? 1 : 0) ^ (U.uTone > 0.5 && !(state.vid && p.vidOn) ? 1 : 0); }
   U.uFx = segs.s[from].fx.map((a, i) => (a * (1 - U.uMix) + segs.s[to].fx[i] * U.uMix) * p.fx);
   U.uAMode = segs.s[from].mode.map((a, i) => a * (1 - U.uMix) + segs.s[to].mode[i] * U.uMix);
   const tone = (k) => k < 4 ? k % 2 : k === 6 ? 1 : 0;
@@ -3117,7 +3229,7 @@ function initUI() {
   };
   $('bOut').onclick = openOutput;
   // «Сбросить эффекты»: всё, что двигает и портит кадр, — в ноль; дальше нужное добавляется ползунками
-  const NO_FX = { ascii: 0, glitch: 0, ca: 0, fx: 0, grain: 0, bloom: 0, cam: 0, scan: 0, digital: 0, freeze: 0, games: 'off', looks: 'off', lfo: {},
+  const NO_FX = { vsyn: 0, ascii: 0, glitch: 0, ca: 0, fx: 0, grain: 0, bloom: 0, cam: 0, scan: 0, digital: 0, freeze: 0, games: 'off', looks: 'off', lfo: {},
     kickAmt: 0, hatAmt: 0, stabAmt: 0, flashAmt: 0, vidDis: 0 };
   $('bNoFx').onclick = () => { Object.assign(state.p, NO_FX); dirtyMap = true; syncControls(); redraw();
     $('hdrNote').textContent = 'эффекты сброшены в ноль — добавляй нужное ползунками справа'; };
