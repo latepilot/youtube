@@ -2455,7 +2455,8 @@ const AMB_FX = [[0, 0, 0, 0], [0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0.5], [1, 0,
 const ASCII_MODES = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [1, 1, 0, 0], [0, 1, 0, 1], [0, 0, 1, 1]];
 function styleSegments(m) {
   const p = state.p, amb = p.theme === 'ambient', scSel = amb ? p.ambScenes : p.scenes, base = amb ? 4 : 0;
-  const key = [p.theme, scSel, p.seed, p.styleMin, p.styleMax, p.bpmFix, p.gridShiftMs].join('|');
+  const vidOn = !!(state.vid && p.vidOn);
+  const key = [p.theme, scSel, p.seed, p.styleMin, p.styleMax, p.bpmFix, p.gridShiftMs, vidOn].join('|');
   if (m.segCache && m.segCache.key === key) return m.segCache;
   const lo = Math.max(0.5, Math.min(p.styleMin, p.styleMax)), hi = Math.max(lo, p.styleMin, p.styleMax);
   const snap = (x) => m.grid && !m.live ? m.beat0 + Math.round((x - m.beat0) / m.beatLen) * m.beatLen : x;
@@ -2473,7 +2474,7 @@ function styleSegments(m) {
     t.push(tt); s.push({ scene: base + scene, seed: seedOfSection(k), mode: ASCII_MODES[mode], fx: fxSet[Math.floor(r(8) * fxSet.length)], trans: isDrop ? 'drop' : 'shift',
       // тип перехода в этот отрезок: 0 — морфинг элементов, 1 — пролёт сквозь центр (и всегда на дропе), 2 — жидкость
       look: LOOKS[Math.floor(r(13) * LOOKS.length)], layout: Math.floor(r(14) * 1e6),
-      vs: { on: r(15) < (amb ? 0.15 : 0.35) ? 1 : 0, bg: Math.floor(r(16) * 5), fill: Math.floor(r(17) * 4), col: r(18) < 0.5 ? 1 : 0 },
+      vs: { on: r(15) < (vidOn ? 0.5 : amb ? 0.15 : 0.35) ? 1 : 0, bg: Math.floor(r(16) * 5), fill: Math.floor(r(17) * 4), col: r(18) < 0.5 ? 1 : 0 },
       kind: amb ? [0, 2, 2, 1, 0, 2][Math.floor(r(9) * 6)] : isDrop ? 1 : [0, 0, 0, 1, 2, 2][Math.floor(r(9) * 6)], spin: [0, 1, 2].map(q => (r(10 + q) - 0.5) * 1.6) });
     let next = Math.max(snap(tt + lo + r(7) * (hi - lo)), tt + 0.5 * lo);
     const d = drops.find(d => d > tt + 0.25 && d < next + 0.25 * lo);   // дроп рядом — меняемся ровно на нём
@@ -2611,7 +2612,9 @@ function frameState(t) {
   // своё видео: вместо сцен — кадр видео, тёмный фон, без переходов между сценами
   if (state.vid && p.vidOn) {
     U.uSceneA = U.uSceneB = 11; U.uMix = 0; U.uTone = 0; U.uBgA = U.uBgB = [0, 0, 0];
-    U.uVidRes = [state.vid.w, state.vid.h]; U.uVid = p.vidDis > 0 ? p.vidDis : 0;   // ноль — никакого расщепления U.uVidCell = p.vidCell; U.uVidPix = p.vidPix;
+    U.uVidRes = [state.vid.w, state.vid.h]; U.uVid = p.vidDis > 0 ? p.vidDis : 0;   // ноль — никакого расщепления
+    // авто-режим видеосинта: на его отрезках расщепление уступает место, отрезки чередуются
+    if (p.vsMode === 'auto' && p.vsyn > 0) U.uVid *= 1 - Math.min(1, U.uVs / p.vsyn); U.uVidCell = p.vidCell; U.uVidPix = p.vidPix;
     U.uVidCol = { video: 0, palette: 1, mono: 2 }[p.vidCol] ?? 0; U.uVidFlow = p.vidFlow; U.uVidReact = p.vidReact;
   } else U.uVid = 0;
   U.uGeoBoth = 0;
@@ -3019,7 +3022,7 @@ async function setFile(kind, file) {
   }
   if (kind === 'video') {
     if (state.vid) { state.vid.el.pause(); URL.revokeObjectURL(state.vid.url); state.vid = null; }
-    if (!file) { drop.classList.remove('has'); drop.querySelector('small').textContent = 'MP4 / MOV / WebM'; $('vpHint').hidden = !!state.audioFile; syncControls(); redraw(); return; }
+    if (!file) { if (state.raw?.silent) { state.raw = null; state.m = null; state.duration = null; drawTimelineBase(); } drop.classList.remove('has'); drop.querySelector('small').textContent = 'MP4 / MOV / WebM'; $('vpHint').hidden = !!state.audioFile; syncControls(); redraw(); return; }
     const url = URL.createObjectURL(file), el = document.createElement('video');
     el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto'; el.src = url;
     await new Promise((ok, fail) => { el.onloadeddata = ok; el.onerror = () => fail(new Error('браузер не открыл это видео (попробуй MP4 H.264)')); });
@@ -3029,7 +3032,15 @@ async function setFile(kind, file) {
     // трека нет — берём звук из самого видео (анализ и рендер)
     if (!state.audioFile) {
       await setFile('audio', file).catch(() => { });
-      if (!state.m) { await setFile('audio', null); state.duration = el.duration; $('anStatus').className = 'note'; $('anStatus').textContent = 'В видео нет звука: ролик соберётся без звука по длине видео (или перетащи трек в «Трек»).'; }
+      if (!state.m) {
+        await setFile('audio', null);
+        // «тихая карта» на длину видео: событий нет, но смены стилей, LFO и все эффекты работают по времени
+        const n = Math.ceil(el.duration * AN.MAP) + 2, z = () => new Uint8Array(n);
+        state.raw = { silent: true, duration: el.duration, beatLen: 0.5, beat0: 0, gridConf: 0, barPhase: 0, kicks: [], hats: [], stabs: [], bass: [],
+          env: { full: z(), low: z(), mid: z(), high: z() }, sections: [{ t: 0, bar: 0, type: 'intro', kick: false, n: 1, trans: '' }] };
+        state.duration = el.duration; dirtyMap = true; ensureMap(); drawTimelineBase();
+        $('anStatus').className = 'note'; $('anStatus').textContent = 'В видео нет звука: эффекты идут по времени, ролик соберётся без звука по длине видео (или перетащи трек в «Трек» — тогда эффекты будут реагировать на него).';
+      }
     }
     $('vpHint').hidden = true;
     await vidSeek(clock.t); redraw();
